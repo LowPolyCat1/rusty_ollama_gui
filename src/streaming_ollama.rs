@@ -27,8 +27,8 @@ fn fetch_and_stream_response(
         let response = client
             .post(&url)
             .json(&json!({
-                "model": model,
-                "prompt": prompt
+                "model": model, // use the actual model name if different
+                "prompt": prompt // adjust the prompt as needed
             }))
             .send()
             .await?;
@@ -39,19 +39,39 @@ fn fetch_and_stream_response(
             let chunk = chunk?;
             let chunk_str = String::from_utf8_lossy(&chunk).to_string();
 
-            // Try to parse the chunk as JSON and extract the "response" field.
-            let token = match serde_json::from_str::<serde_json::Value>(&chunk_str) {
-                Ok(json_value) => json_value
-                    .get("response")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or(&chunk_str)
-                    .to_string(),
-                Err(_) => chunk_str,
-            };
-
-            let _ = output.send(OllamaStreamProgress::Streaming { token }).await;
+            if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&chunk_str) {
+                // Check if the "done" field is true.
+                if json_value
+                    .get("done")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+                {
+                    // Extract context from JSON if available; otherwise, use an empty vector.
+                    let context = json_value
+                        .get("context")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| arr.iter().filter_map(|x| x.as_u64()).collect::<Vec<u64>>())
+                        .unwrap_or_else(Vec::new);
+                    let _ = output
+                        .send(OllamaStreamProgress::Finished { context })
+                        .await;
+                    break;
+                } else {
+                    // Otherwise extract the "response" text.
+                    let token = json_value
+                        .get("response")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(&chunk_str)
+                        .to_string();
+                    let _ = output.send(OllamaStreamProgress::Streaming { token }).await;
+                }
+            } else {
+                // Fallback if JSON parsing fails.
+                let _ = output
+                    .send(OllamaStreamProgress::Streaming { token: chunk_str })
+                    .await;
+            }
         }
-        let _ = output.send(OllamaStreamProgress::Finished).await;
         Ok(())
     })
 }
@@ -59,7 +79,7 @@ fn fetch_and_stream_response(
 #[derive(Debug, Clone)]
 pub enum OllamaStreamProgress {
     Streaming { token: String },
-    Finished,
+    Finished { context: Vec<u64> },
 }
 
 #[derive(Debug, Clone)]

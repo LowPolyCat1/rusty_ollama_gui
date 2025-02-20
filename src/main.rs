@@ -108,17 +108,17 @@ impl Default for OllamaGUI {
 }
 
 #[derive(Debug)]
-struct Ollama {
-    uuid: uuid::Uuid,
-    state: OllamaStreamState,
-}
-
-#[derive(Debug)]
 enum OllamaStreamState {
     Idle,
     Streaming { output: String },
-    Finished { output: String },
+    Finished { output: String, context: Vec<u64> },
     Errored,
+}
+
+#[derive(Debug)]
+struct Ollama {
+    uuid: uuid::Uuid,
+    state: OllamaStreamState,
 }
 
 impl Ollama {
@@ -152,8 +152,8 @@ impl Ollama {
                 Ok(streaming_ollama::OllamaStreamProgress::Streaming { token }) => {
                     output.push_str(&token);
                 }
-                Ok(streaming_ollama::OllamaStreamProgress::Finished) => {
-                    // When finished, preserve the final output
+                Ok(streaming_ollama::OllamaStreamProgress::Finished { context }) => {
+                    // When finished, preserve the final output and store the context.
                     let final_output = if let OllamaStreamState::Streaming { output } =
                         std::mem::replace(&mut self.state, OllamaStreamState::Idle)
                     {
@@ -163,6 +163,7 @@ impl Ollama {
                     };
                     self.state = OllamaStreamState::Finished {
                         output: final_output,
+                        context,
                     };
                 }
                 Err(_error) => {
@@ -195,10 +196,12 @@ impl Ollama {
                 .spacing(10)
                 .align_x(Center)
                 .into(),
-            OllamaStreamState::Finished { output } => column![
+            OllamaStreamState::Finished { output, context } => column![
                 "Streaming finished!",
                 "Final output:",
                 text(output),
+                "Context:",
+                text(format!("{:?}", context)),
                 button("Start again").on_press(Message::Request(self.uuid))
             ]
             .spacing(10)
