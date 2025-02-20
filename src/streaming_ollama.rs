@@ -27,8 +27,8 @@ fn fetch_and_stream_response(
         let response = client
             .post(&url)
             .json(&json!({
-                "model": model, // use the actual model name if different
-                "prompt": prompt // adjust the prompt as needed
+                "model": model,
+                "prompt": prompt
             }))
             .send()
             .await?;
@@ -37,7 +37,18 @@ fn fetch_and_stream_response(
         let mut stream = response.bytes_stream();
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
-            let token = String::from_utf8_lossy(&chunk).to_string();
+            let chunk_str = String::from_utf8_lossy(&chunk).to_string();
+
+            // Try to parse the chunk as JSON and extract the "response" field.
+            let token = match serde_json::from_str::<serde_json::Value>(&chunk_str) {
+                Ok(json_value) => json_value
+                    .get("response")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&chunk_str)
+                    .to_string(),
+                Err(_) => chunk_str,
+            };
+
             let _ = output.send(OllamaStreamProgress::Streaming { token }).await;
         }
         let _ = output.send(OllamaStreamProgress::Finished).await;
