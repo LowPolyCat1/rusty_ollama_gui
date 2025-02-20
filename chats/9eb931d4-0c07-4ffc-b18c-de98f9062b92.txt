@@ -1,2 +1,0 @@
-Prompt: prompt
-Response: Hello! How can I assist you today? If you have a specific prompt or topic in mind, feel free to share it with me, and I'll do my best to help. Whether you're looking for information, advice, or just want to chat about something interesting, I'm here to support you. Let me know how I can be of service!

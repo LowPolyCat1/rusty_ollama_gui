@@ -3,6 +3,7 @@ use iced::widget::{button, center, column, text, Column};
 use iced::window::settings::PlatformSpecific;
 use iced::window::Position;
 use iced::{Center, Element, Right, Settings, Size, Subscription};
+use serde::{Deserialize, Serialize};
 use uuid;
 
 mod streaming_ollama;
@@ -28,7 +29,7 @@ fn windows_settings() -> iced::window::Settings {
     .unwrap();
     iced::window::Settings {
         size: Size::new(1080.0, 720.0),
-        position: Position::Centered, // change as needed
+        position: Position::Centered,
         min_size: Some(Size::new(300.0, 100.0)),
         max_size: None,
         visible: true,
@@ -51,12 +52,7 @@ struct OllamaGUI {
 pub enum Message {
     Add,
     Request(uuid::Uuid),
-    RequestProgressed(
-        (
-            uuid::Uuid,
-            Result<streaming_ollama::OllamaStreamProgress, streaming_ollama::Error>,
-        ),
-    ),
+    RequestProgressed((uuid::Uuid, Result<OllamaStreamProgress, OllamaError>)),
 }
 
 impl OllamaGUI {
@@ -116,24 +112,45 @@ enum OllamaStreamState {
     Errored,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct ChatHistory {
+    display_name: String,
+    uuid: String,
+    context: Vec<u64>,
+    model: String,
+    chat: Vec<ChatEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ChatEntry {
+    prompt: String,
+    response: String,
+}
+
 #[derive(Debug)]
 struct Ollama {
     uuid: uuid::Uuid,
+    display_name: String,
     state: OllamaStreamState,
     prompt: String,
+    model: String,
+    context: Option<Vec<u64>>,
 }
 
 impl Ollama {
     pub fn new() -> Self {
-        Ollama {
-            uuid: uuid::Uuid::new_v4(),
+        let uuid = uuid::Uuid::new_v4();
+        Self {
+            uuid,
+            display_name: format!("Chat-{}", uuid),
             state: OllamaStreamState::Idle,
-            prompt: "prompt".to_string(), // You can change the default prompt as needed.
+            prompt: "prompt".to_string(),
+            model: "phi4".to_string(),
+            context: None,
         }
     }
 
     pub fn start(&mut self) {
-        // Transition into a streaming state when starting.
         match self.state {
             OllamaStreamState::Idle
             | OllamaStreamState::Finished { .. }
@@ -146,17 +163,13 @@ impl Ollama {
         }
     }
 
-    pub fn progress(
-        &mut self,
-        new_progress: Result<streaming_ollama::OllamaStreamProgress, streaming_ollama::Error>,
-    ) {
+    pub fn progress(&mut self, new_progress: Result<OllamaStreamProgress, OllamaError>) {
         if let OllamaStreamState::Streaming { ref mut output } = self.state {
             match new_progress {
-                Ok(streaming_ollama::OllamaStreamProgress::Streaming { token }) => {
+                Ok(OllamaStreamProgress::Streaming { token }) => {
                     output.push_str(&token);
                 }
-                Ok(streaming_ollama::OllamaStreamProgress::Finished { context }) => {
-                    // When finished, preserve the final output and store the context.
+                Ok(OllamaStreamProgress::Finished { context }) => {
                     let final_output = if let OllamaStreamState::Streaming { output } =
                         std::mem::replace(&mut self.state, OllamaStreamState::Idle)
                     {
@@ -164,19 +177,50 @@ impl Ollama {
                     } else {
                         String::new()
                     };
+
+                    self.context = Some(context.clone());
                     self.state = OllamaStreamState::Finished {
                         output: final_output.clone(),
-                        context,
+                        context: context.clone(),
                     };
 
-                    // Save the prompt and final output to a file in ./chats using the uuid as the filename.
+                    // Save as JSON
+                    let chat_entry = ChatEntry {
+                        prompt: self.prompt.clone(),
+                        response: final_output,
+                    };
+
+                    let file_path = format!("./chats/{}.json", self.uuid);
                     if let Err(e) = std::fs::create_dir_all("./chats") {
                         eprintln!("Error creating chats directory: {}", e);
                     }
-                    let file_path = format!("./chats/{}.txt", self.uuid);
-                    let content = format!("Prompt: {}\nResponse: {}", self.prompt, final_output);
-                    if let Err(e) = std::fs::write(&file_path, content) {
-                        eprintln!("Error writing chat file {}: {}", file_path, e);
+
+                    let mut chat_history = match std::fs::File::open(&file_path) {
+                        Ok(file) => serde_json::from_reader(file).unwrap_or_else(|_| ChatHistory {
+                            display_name: self.display_name.clone(),
+                            uuid: self.uuid.to_string(),
+                            context: vec![],
+                            model: self.model.clone(),
+                            chat: vec![],
+                        }),
+                        Err(_) => ChatHistory {
+                            display_name: self.display_name.clone(),
+                            uuid: self.uuid.to_string(),
+                            context: vec![],
+                            model: self.model.clone(),
+                            chat: vec![],
+                        },
+                    };
+
+                    chat_history.context = context;
+                    chat_history.chat.push(chat_entry);
+
+                    if let Ok(file) = std::fs::File::create(&file_path) {
+                        if let Err(e) = serde_json::to_writer_pretty(file, &chat_history) {
+                            eprintln!("Error writing JSON to file {}: {}", file_path, e);
+                        }
+                    } else {
+                        eprintln!("Error creating file: {}", file_path);
                     }
                 }
                 Err(_error) => {
@@ -188,11 +232,13 @@ impl Ollama {
 
     pub fn subscription(&self) -> Subscription<Message> {
         match self.state {
-            OllamaStreamState::Streaming { .. } => {
-                // Replace the URL with your actual Ollama streaming endpoint.
-                subscribe_to_stream(self.uuid, "http://localhost:11434/api/generate")
-                    .map(Message::RequestProgressed)
-            }
+            OllamaStreamState::Streaming { .. } => subscribe_to_stream(
+                self.uuid,
+                "http://localhost:11434/api/generate",
+                &self.prompt,
+                &self.model,
+            )
+            .map(Message::RequestProgressed),
             _ => Subscription::none(),
         }
     }
