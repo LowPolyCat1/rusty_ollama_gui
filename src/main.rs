@@ -1,11 +1,12 @@
-mod streaming_ollama;
-
-use iced::advanced::graphics::image::image_rs::ImageFormat;
+use iced::futures::StreamExt;
 use iced::widget::{button, center, column, text, Column};
 use iced::window::settings::PlatformSpecific;
 use iced::window::Position;
 use iced::{Center, Element, Right, Settings, Size, Subscription};
 use uuid;
+
+mod streaming_ollama;
+use streaming_ollama::{subscribe_to_stream, Error as OllamaError, OllamaStreamProgress};
 
 pub fn main() -> iced::Result {
     iced::application("Ollama GUI", OllamaGUI::update, OllamaGUI::view)
@@ -22,12 +23,12 @@ fn settings() -> Settings {
 fn windows_settings() -> iced::window::Settings {
     let icon = iced::window::icon::from_file_data(
         include_bytes!("../images/logo.png"),
-        Some(ImageFormat::Png),
+        Some(iced::advanced::graphics::image::image_rs::ImageFormat::Png),
     )
     .unwrap();
     iced::window::Settings {
         size: Size::new(1080.0, 720.0),
-        position: Position::Centered, // at some point change this to Position::SpecificWith for based on previous location
+        position: Position::Centered, // change as needed
         min_size: Some(Size::new(300.0, 100.0)),
         max_size: None,
         visible: true,
@@ -37,7 +38,7 @@ fn windows_settings() -> iced::window::Settings {
         level: iced::window::Level::Normal,
         icon: Some(icon),
         platform_specific: PlatformSpecific::default(),
-        exit_on_close_request: false,
+        exit_on_close_request: true,
     }
 }
 
@@ -119,6 +120,7 @@ enum OllamaStreamState {
 struct Ollama {
     uuid: uuid::Uuid,
     state: OllamaStreamState,
+    prompt: String,
 }
 
 impl Ollama {
@@ -126,11 +128,12 @@ impl Ollama {
         Ollama {
             uuid: uuid::Uuid::new_v4(),
             state: OllamaStreamState::Idle,
+            prompt: "prompt".to_string(), // You can change the default prompt as needed.
         }
     }
 
     pub fn start(&mut self) {
-        // Transition into a streaming state when starting
+        // Transition into a streaming state when starting.
         match self.state {
             OllamaStreamState::Idle
             | OllamaStreamState::Finished { .. }
@@ -162,9 +165,19 @@ impl Ollama {
                         String::new()
                     };
                     self.state = OllamaStreamState::Finished {
-                        output: final_output,
+                        output: final_output.clone(),
                         context,
                     };
+
+                    // Save the prompt and final output to a file in ./chats using the uuid as the filename.
+                    if let Err(e) = std::fs::create_dir_all("./chats") {
+                        eprintln!("Error creating chats directory: {}", e);
+                    }
+                    let file_path = format!("./chats/{}.txt", self.uuid);
+                    let content = format!("Prompt: {}\nResponse: {}", self.prompt, final_output);
+                    if let Err(e) = std::fs::write(&file_path, content) {
+                        eprintln!("Error writing chat file {}: {}", file_path, e);
+                    }
                 }
                 Err(_error) => {
                     self.state = OllamaStreamState::Errored;
@@ -177,11 +190,8 @@ impl Ollama {
         match self.state {
             OllamaStreamState::Streaming { .. } => {
                 // Replace the URL with your actual Ollama streaming endpoint.
-                streaming_ollama::subscribe_to_stream(
-                    self.uuid,
-                    "http://localhost:11434/api/generate",
-                )
-                .map(Message::RequestProgressed)
+                subscribe_to_stream(self.uuid, "http://localhost:11434/api/generate")
+                    .map(Message::RequestProgressed)
             }
             _ => Subscription::none(),
         }
