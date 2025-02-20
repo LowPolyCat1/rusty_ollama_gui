@@ -14,8 +14,13 @@ iced = { version = "0.13.1", features = ["image", "tokio"] }
 iced_aw = { version = "0.12.0" }
 tokio = { version = "1.43.0", features = ["full"] }
 reqwest = { version = "0.12.12", features = ["stream", "rustls-tls", "json"] }
-uuid = { version = "1.13.2" }
+uuid = { version = "1.13.2", features = ["v4"] }
 serde_json = { version = "1.0.139" }
+
+
+[target.'cfg(windows)'.build-dependencies]
+windows_exe_info = "0.4.2"
+
 
 [dev-dependencies]
 

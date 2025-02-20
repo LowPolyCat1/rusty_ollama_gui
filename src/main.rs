@@ -1,28 +1,59 @@
-mod download;
+mod streaming_ollama;
 
+use iced::advanced::graphics::image::image_rs::ImageFormat;
 use iced::widget::{button, center, column, text, Column};
-use iced::{Center, Element, Right, Subscription};
+use iced::window::settings::PlatformSpecific;
+use iced::window::Position;
+use iced::{Center, Element, Right, Settings, Size, Subscription};
+use uuid;
 
 pub fn main() -> iced::Result {
-    iced::application("Ollama Stream - Iced", OllamaGUI::update, OllamaGUI::view)
+    iced::application("Ollama GUI", OllamaGUI::update, OllamaGUI::view)
         .subscription(OllamaGUI::subscription)
+        .settings(settings())
+        .window(windows_settings())
         .run()
+}
+
+fn settings() -> Settings {
+    Settings::default()
+}
+
+fn windows_settings() -> iced::window::Settings {
+    let icon = iced::window::icon::from_file_data(
+        include_bytes!("../images/logo.png"),
+        Some(ImageFormat::Png),
+    )
+    .unwrap();
+    iced::window::Settings {
+        size: Size::new(1080.0, 720.0),
+        position: Position::Centered, // at some point change this to Position::SpecificWith for based on previous location
+        min_size: Some(Size::new(300.0, 100.0)),
+        max_size: None,
+        visible: true,
+        resizable: true,
+        decorations: true,
+        transparent: false,
+        level: iced::window::Level::Normal,
+        icon: Some(icon),
+        platform_specific: PlatformSpecific::default(),
+        exit_on_close_request: false,
+    }
 }
 
 #[derive(Debug)]
 struct OllamaGUI {
-    downloads: Vec<Ollama>,
-    last_id: usize,
+    responses: Vec<Ollama>,
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
     Add,
-    Download(usize),
-    DownloadProgressed(
+    Request(uuid::Uuid),
+    RequestProgressed(
         (
-            usize,
-            Result<download::OllamaStreamProgress, download::Error>,
+            uuid::Uuid,
+            Result<streaming_ollama::OllamaStreamProgress, streaming_ollama::Error>,
         ),
     ),
 }
@@ -30,36 +61,34 @@ pub enum Message {
 impl OllamaGUI {
     fn new() -> Self {
         Self {
-            downloads: vec![Ollama::new(0)],
-            last_id: 0,
+            responses: vec![Ollama::new()],
         }
     }
 
     fn update(&mut self, message: Message) {
         match message {
             Message::Add => {
-                self.last_id += 1;
-                self.downloads.push(Ollama::new(self.last_id));
+                self.responses.push(Ollama::new());
             }
-            Message::Download(id) => {
-                if let Some(download) = self.downloads.iter_mut().find(|d| d.id == id) {
-                    download.start();
+            Message::Request(id) => {
+                if let Some(request) = self.responses.iter_mut().find(|ollama| ollama.uuid == id) {
+                    request.start();
                 }
             }
-            Message::DownloadProgressed((id, progress)) => {
-                if let Some(download) = self.downloads.iter_mut().find(|d| d.id == id) {
-                    download.progress(progress);
+            Message::RequestProgressed((id, progress)) => {
+                if let Some(request) = self.responses.iter_mut().find(|ollama| ollama.uuid == id) {
+                    request.progress(progress);
                 }
             }
         }
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        Subscription::batch(self.downloads.iter().map(Ollama::subscription))
+        Subscription::batch(self.responses.iter().map(Ollama::subscription))
     }
 
     fn view(&self) -> Element<Message> {
-        let downloads = Column::with_children(self.downloads.iter().map(Ollama::view))
+        let responses = Column::with_children(self.responses.iter().map(Ollama::view))
             .push(
                 button("Add another stream")
                     .on_press(Message::Add)
@@ -68,7 +97,7 @@ impl OllamaGUI {
             .spacing(20)
             .align_x(Right);
 
-        center(downloads).padding(20).into()
+        center(responses).padding(20).into()
     }
 }
 
@@ -80,7 +109,7 @@ impl Default for OllamaGUI {
 
 #[derive(Debug)]
 struct Ollama {
-    id: usize,
+    uuid: uuid::Uuid,
     state: OllamaStreamState,
 }
 
@@ -93,9 +122,9 @@ enum OllamaStreamState {
 }
 
 impl Ollama {
-    pub fn new(id: usize) -> Self {
+    pub fn new() -> Self {
         Ollama {
-            id,
+            uuid: uuid::Uuid::new_v4(),
             state: OllamaStreamState::Idle,
         }
     }
@@ -116,14 +145,14 @@ impl Ollama {
 
     pub fn progress(
         &mut self,
-        new_progress: Result<download::OllamaStreamProgress, download::Error>,
+        new_progress: Result<streaming_ollama::OllamaStreamProgress, streaming_ollama::Error>,
     ) {
         if let OllamaStreamState::Streaming { ref mut output } = self.state {
             match new_progress {
-                Ok(download::OllamaStreamProgress::Streaming { token }) => {
+                Ok(streaming_ollama::OllamaStreamProgress::Streaming { token }) => {
                     output.push_str(&token);
                 }
-                Ok(download::OllamaStreamProgress::Finished) => {
+                Ok(streaming_ollama::OllamaStreamProgress::Finished) => {
                     // When finished, preserve the final output
                     let final_output = if let OllamaStreamState::Streaming { output } =
                         std::mem::replace(&mut self.state, OllamaStreamState::Idle)
@@ -147,8 +176,11 @@ impl Ollama {
         match self.state {
             OllamaStreamState::Streaming { .. } => {
                 // Replace the URL with your actual Ollama streaming endpoint.
-                download::subscribe_to_stream(self.id, "http://localhost:11434/api/generate")
-                    .map(Message::DownloadProgressed)
+                streaming_ollama::subscribe_to_stream(
+                    self.uuid,
+                    "http://localhost:11434/api/generate",
+                )
+                .map(Message::RequestProgressed)
             }
             _ => Subscription::none(),
         }
@@ -157,7 +189,7 @@ impl Ollama {
     pub fn view(&self) -> Element<Message> {
         let control: Element<_> = match &self.state {
             OllamaStreamState::Idle => button("Start streaming from Ollama!")
-                .on_press(Message::Download(self.id))
+                .on_press(Message::Request(self.uuid))
                 .into(),
             OllamaStreamState::Streaming { output } => column!["Streaming output:", text(output)]
                 .spacing(10)
@@ -167,14 +199,14 @@ impl Ollama {
                 "Streaming finished!",
                 "Final output:",
                 text(output),
-                button("Start again").on_press(Message::Download(self.id))
+                button("Start again").on_press(Message::Request(self.uuid))
             ]
             .spacing(10)
             .align_x(Center)
             .into(),
             OllamaStreamState::Errored => column![
                 "Something went wrong :(",
-                button("Try again").on_press(Message::Download(self.id))
+                button("Try again").on_press(Message::Request(self.uuid))
             ]
             .spacing(10)
             .align_x(Center)
