@@ -1,0 +1,24 @@
+[package]
+name = "rusty_ollama_gui"
+version = "0.1.0"
+edition = "2021"
+authors = ["lowpolycat1"]
+description = "A blazingly fast Ollama GUI written in rust"
+license = "MIT"
+repository = "https://github.com/lowpolycat1/rusty_ollama_gui"
+publish = false
+
+
+[dependencies]
+
+
+[dev-dependencies]
+
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+debug = false
+panic = "abort"
+rpath = false
