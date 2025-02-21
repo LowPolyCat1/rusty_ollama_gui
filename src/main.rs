@@ -1,10 +1,14 @@
+#![windows_subsystem = "windows"]
 use iced::alignment::Horizontal;
+use iced::theme::Theme as IcedTheme;
 use iced::widget::{button, column, container, row, scrollable, text, text_input};
 use iced::window::settings::PlatformSpecific;
 use iced::window::Position;
 use iced::{Alignment, Element, Length, Settings, Size, Subscription};
+use iced_widget::scrollable::Direction;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::path::PathBuf;
 use uuid::Uuid;
 
 mod streaming_ollama;
@@ -32,7 +36,7 @@ fn windows_settings() -> iced::window::Settings {
     iced::window::Settings {
         size: Size::new(1080.0, 720.0),
         position: Position::Centered,
-        min_size: Some(Size::new(300.0, 100.0)),
+        min_size: Some(Size::new(960.0, 544.0)),
         max_size: None,
         visible: true,
         resizable: true,
@@ -45,11 +49,27 @@ fn windows_settings() -> iced::window::Settings {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct AppSettings {
+    theme: String,
+    default_url: String,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            theme: format!("{:?}", IcedTheme::GruvboxDark),
+            default_url: "http://localhost:11434".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum AppState {
     Chat,
     Settings,
 }
+
 #[derive(Debug)]
 struct OllamaGUI {
     chats: Vec<OllamaChat>,
@@ -78,7 +98,39 @@ pub enum Message {
 }
 
 impl OllamaGUI {
+    fn load_settings() -> AppSettings {
+        let path = PathBuf::from("./settings/settings.json");
+        if path.exists() {
+            match fs::read_to_string(&path) {
+                Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
+                Err(_) => AppSettings::default(),
+            }
+        } else {
+            let _ = fs::create_dir_all("./settings");
+            AppSettings::default()
+        }
+    }
+
+    fn save_settings(&self) {
+        let path = PathBuf::from("./settings/settings.json");
+        let settings = AppSettings {
+            theme: format!("{:?}", self.theme),
+            default_url: self.default_url.clone(),
+        };
+        let _ = fs::write(path, serde_json::to_string_pretty(&settings).unwrap());
+    }
+
     fn new() -> Self {
+        let settings = Self::load_settings();
+        let mut theme = IcedTheme::GruvboxDark;
+
+        for available in IcedTheme::ALL {
+            if format!("{:?}", available) == settings.theme {
+                theme = available.clone();
+                break;
+            }
+        }
+
         let mut chats = Vec::new();
 
         if let Ok(entries) = fs::read_dir("./chats") {
@@ -114,8 +166,8 @@ impl OllamaGUI {
             },
             editing_chat: None,
             state: AppState::Chat,
-            default_url: "http://localhost:11434".to_string(),
-            theme: iced::Theme::GruvboxDark,
+            default_url: settings.default_url,
+            theme,
         }
     }
 
@@ -176,8 +228,14 @@ impl OllamaGUI {
                 let _ = std::fs::remove_file(format!("./chats/{}.json", uuid));
             }
             Message::ChangeAppState(app_state) => self.state = app_state,
-            Message::ChangeTheme(theme) => self.theme = theme,
-            Message::ChangeDefaultUrl(url) => self.default_url = url,
+            Message::ChangeTheme(theme) => {
+                self.theme = theme;
+                self.save_settings();
+            }
+            Message::ChangeDefaultUrl(url) => {
+                self.default_url = url;
+                self.save_settings();
+            }
         }
     }
 
@@ -194,35 +252,44 @@ impl OllamaGUI {
     }
 
     fn view(&self) -> Element<Message> {
+        // Top navigation bar with compact spacing
+        let top_nav = row![
+            button("Chats")
+                .on_press(Message::ChangeAppState(AppState::Chat))
+                .padding([5, 10])
+                .width(Length::Shrink),
+            button("Settings")
+                .on_press(Message::ChangeAppState(AppState::Settings))
+                .padding([5, 10])
+                .width(Length::Shrink),
+        ]
+        .spacing(5)
+        .padding([0, 5])
+        .align_y(Alignment::Start);
+
         match self.state {
             AppState::Chat => {
-                let sidebar_chats = scrollable(column(self.chats.iter().map(|chat| {
-                    {
+                let sidebar_chats = scrollable(
+                    column(self.chats.iter().map(|chat| {
                         chat.sidebar_view(
                             chat.uuid == self.current_chat,
                             self.editing_chat == Some(chat.uuid),
                         )
-                    }
-                })))
-                .spacing(10)
+                    }))
+                    .spacing(5),
+                )
+                .spacing(5)
                 .width(Length::Fill)
                 .height(Length::Fill);
 
                 let left_sidebar = column![
-                    row![
-                        button("New Chat")
-                            .on_press(Message::NewChat)
-                            .width(Length::Shrink)
-                            .padding([5, 10]),
-                        button("Settings")
-                            .on_press(Message::ChangeAppState(AppState::Settings))
-                            .padding([5, 10])
-                    ]
-                    .padding([5, 10])
-                    .width(Length::Shrink),
+                    row![button("New Chat")
+                        .on_press(Message::NewChat)
+                        .padding([5, 10])]
+                    .padding([5, 0]),
                     sidebar_chats
                 ]
-                .spacing(10)
+                .spacing(5)
                 .width(Length::FillPortion(1));
 
                 let current_chat = self
@@ -237,34 +304,36 @@ impl OllamaGUI {
                     .height(Length::Fill)
                     .align_x(Horizontal::Center);
 
-                let right_sidebar = column![];
-
-                row![left_sidebar, main_content, right_sidebar]
-                    .spacing(20)
-                    .padding(10)
-                    .into()
+                column![
+                    top_nav,
+                    row![left_sidebar, main_content]
+                        .spacing(10)
+                        .padding(5)
+                        .height(Length::Fill)
+                ]
+                .into()
             }
             AppState::Settings => column![
-                row![
-                    button("Chats")
-                        .on_press(Message::ChangeAppState(AppState::Chat))
-                        .width(Length::Shrink)
-                        .padding([5, 10]),
-                    button("Settings")
-                        .on_press(Message::ChangeAppState(AppState::Settings))
-                        .padding([5, 10]),
-                ],
-                text!("Theme"),
-                iced::widget::pick_list(iced::Theme::ALL, Some(self.theme()), Message::ChangeTheme)
+                top_nav,
+                column![
+                    text("Theme").size(16),
+                    iced::widget::pick_list(
+                        iced::Theme::ALL,
+                        Some(self.theme()),
+                        Message::ChangeTheme
+                    )
                     .padding([5, 10])
                     .width(Length::Shrink),
-                text!("Ollama URL"),
-                iced::widget::text_input("http://localhost:11434", &self.default_url)
-                    .on_input(Message::ChangeDefaultUrl)
-                    .width(Length::Fixed(300.0))
+                    text("Ollama URL").size(16),
+                    text_input("http://localhost:11434", &self.default_url)
+                        .on_input(Message::ChangeDefaultUrl)
+                        .padding(5)
+                        .width(Length::Fixed(300.0))
+                ]
+                .spacing(10)
+                .padding(10)
+                .align_x(Alignment::Start)
             ]
-            .spacing(10)
-            .width(Length::FillPortion(1))
             .into(),
         }
     }
@@ -275,6 +344,7 @@ impl Default for OllamaGUI {
         Self::new()
     }
 }
+
 #[derive(Debug, Clone)]
 enum ChatState {
     Idle,
@@ -447,7 +517,7 @@ impl OllamaChat {
             row![
                 text(current_name).width(Length::Fill),
                 button("✎").on_press(Message::StartRenameChat(self.uuid)),
-                button("🗑").on_press(Message::DeleteChat(self.uuid)) // .style(iced::theme::Button::Destructive)
+                button("🗑").on_press(Message::DeleteChat(self.uuid))
             ]
             .spacing(5)
         };
@@ -464,11 +534,7 @@ impl OllamaChat {
             .align_y(Alignment::Center);
 
         if is_selected {
-            container(content)
-                // .style(iced::theme::Container::Box)
-                .padding(5)
-                .width(Length::Fill)
-                .into()
+            container(content).padding(5).width(Length::Fill).into()
         } else {
             button(content)
                 .on_press(Message::SelectChat(self.uuid))
