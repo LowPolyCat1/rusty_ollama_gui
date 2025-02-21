@@ -1,5 +1,4 @@
 use iced::alignment::Horizontal;
-use iced::futures::StreamExt;
 use iced::widget::{button, column, container, row, scrollable, text, text_input};
 use iced::window::settings::PlatformSpecific;
 use iced::window::Position;
@@ -44,11 +43,19 @@ fn windows_settings() -> iced::window::Settings {
         exit_on_close_request: true,
     }
 }
+
+#[derive(Debug, Clone)]
+pub enum AppState {
+    Chat,
+    Settings,
+}
 #[derive(Debug)]
 struct OllamaGUI {
     chats: Vec<OllamaChat>,
     current_chat: Uuid,
     editing_chat: Option<Uuid>,
+    state: AppState,
+    default_url: String,
 }
 
 #[derive(Debug, Clone)]
@@ -63,6 +70,7 @@ pub enum Message {
     CancelRenameChat(Uuid),
     UpdateTempName(Uuid, String),
     DeleteChat(Uuid),
+    ChangeAppState(AppState),
 }
 
 impl OllamaGUI {
@@ -101,6 +109,8 @@ impl OllamaGUI {
                 chats
             },
             editing_chat: None,
+            state: AppState::Chat,
+            default_url: "http://localhost:11434".to_string(),
         }
     }
 
@@ -160,6 +170,7 @@ impl OllamaGUI {
                 }
                 let _ = std::fs::remove_file(format!("./chats/{}.json", uuid));
             }
+            Message::ChangeAppState(app_state) => self.state = app_state,
         }
     }
 
@@ -168,47 +179,72 @@ impl OllamaGUI {
     }
 
     fn view(&self) -> Element<Message> {
-        let sidebar_chats = scrollable(column(self.chats.iter().map(|chat| {
-            {
-                chat.sidebar_view(
-                    chat.uuid == self.current_chat,
-                    self.editing_chat == Some(chat.uuid),
-                )
+        match self.state {
+            AppState::Chat => {
+                let sidebar_chats = scrollable(column(self.chats.iter().map(|chat| {
+                    {
+                        chat.sidebar_view(
+                            chat.uuid == self.current_chat,
+                            self.editing_chat == Some(chat.uuid),
+                        )
+                    }
+                    // .collect::<Vec<_>>()
+                })))
+                .spacing(10)
+                .width(Length::Fill)
+                .height(Length::Fill);
+
+                let left_sidebar = column![
+                    row![
+                        button("New Chat")
+                            .on_press(Message::NewChat)
+                            .width(Length::Shrink)
+                            .padding([5, 10]),
+                        button("Settings")
+                            .on_press(Message::ChangeAppState(AppState::Settings))
+                            .padding([5, 10])
+                    ]
+                    .padding([5, 10])
+                    .width(Length::Shrink),
+                    sidebar_chats
+                ]
+                .spacing(10)
+                .width(Length::FillPortion(1));
+
+                let current_chat = self
+                    .chats
+                    .iter()
+                    .find(|c| c.uuid == self.current_chat)
+                    .map(|chat| chat.main_view())
+                    .unwrap_or_else(|| column!().into());
+
+                let main_content = container(current_chat)
+                    .width(Length::FillPortion(4))
+                    .height(Length::Fill)
+                    .align_x(Horizontal::Center);
+
+                let right_sidebar = column![];
+
+                row![left_sidebar, main_content, right_sidebar]
+                    .spacing(20)
+                    .padding(10)
+                    .into()
             }
-            // .collect::<Vec<_>>()
-        })))
-        .spacing(10)
-        .width(Length::Fill)
-        .height(Length::Fill);
-
-        let left_sidebar = column![
-            button("New Chat")
-                .on_press(Message::NewChat)
-                .width(Length::Shrink)
-                .padding([5, 10]),
-            sidebar_chats
-        ]
-        .spacing(10)
-        .width(Length::FillPortion(1));
-
-        let current_chat = self
-            .chats
-            .iter()
-            .find(|c| c.uuid == self.current_chat)
-            .map(|chat| chat.main_view())
-            .unwrap_or_else(|| column!().into());
-
-        let main_content = container(current_chat)
-            .width(Length::FillPortion(4))
-            .height(Length::Fill)
-            .align_x(Horizontal::Center);
-
-        let right_sidebar = column![];
-
-        row![left_sidebar, main_content, right_sidebar]
-            .spacing(20)
-            .padding(10)
-            .into()
+            AppState::Settings => column![row![
+                button("Chats")
+                    .on_press(Message::ChangeAppState(AppState::Chat))
+                    .width(Length::Shrink)
+                    .padding([5, 10]),
+                button("Settings")
+                    .on_press(Message::ChangeAppState(AppState::Settings))
+                    .padding([5, 10])
+            ]
+            .padding([5, 10])
+            .width(Length::Shrink)]
+            .spacing(10)
+            .width(Length::FillPortion(1))
+            .into(),
+        }
     }
 }
 
