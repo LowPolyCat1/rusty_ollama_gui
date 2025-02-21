@@ -341,8 +341,16 @@ impl OllamaChat {
         )
         .height(Length::Fill);
 
+        let submit_msg = {
+            match self.state {
+                ChatState::Streaming => None,
+                _ => Some(Message::StartChat(self.uuid)),
+            }
+        };
+
         let prompt_input = text_input("Type your prompt...", &self.input_prompt)
             .on_input(move |text| Message::PromptChanged(self.uuid, text))
+            .on_submit_maybe(submit_msg)
             .padding(10)
             .size(16);
 
