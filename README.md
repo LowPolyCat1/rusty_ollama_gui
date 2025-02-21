@@ -94,7 +94,7 @@ cargo build --release
 
 // TODO
 
-See the [open issues](https://github.com/lowpolycat1/rusty_ollama/issues) for full list of proposed features.
+See the [open issues](https://github.com/lowpolycat1/rusty_ollama_gui/issues) for full list of proposed features.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -116,8 +116,8 @@ Don't forget to give the project a star! Thanks again!
 
 ### Top contributors
 
-<a href="https://github.com/lowpolycat1/rusty_ollama/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=lowpolycat1/rusty_ollama" alt="contrib.rocks image" />
+<a href="https://github.com/lowpolycat1/rusty_ollama_gui/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=lowpolycat1/rusty_ollama_gui" alt="contrib.rocks image" />
 </a>
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
@@ -134,7 +134,7 @@ Distributed under the MIT License. See `LICENSE.txt` for more information.
 
 lowpolycat1 - @acrylic_spark (discord)
 
-Project Link: [https://github.com/lowpolycat1/rusty_ollama](https://github.com/lowpolycat1/rusty_ollama)
+Project Link: [https://github.com/lowpolycat1/rusty_ollama_gui](https://github.com/lowpolycat1/rusty_ollama_gui)
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
