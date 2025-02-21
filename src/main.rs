@@ -1,11 +1,15 @@
 #![windows_subsystem = "windows"]
+use iced::advanced::widget::operation::TextInput;
 use iced::alignment::Horizontal;
+use iced::border::{width, Radius};
+use iced::daemon::Appearance;
 use iced::theme::Theme as IcedTheme;
 use iced::widget::{button, column, container, row, scrollable, text, text_input};
 use iced::window::settings::PlatformSpecific;
 use iced::window::Position;
-use iced::{Alignment, Element, Length, Settings, Size, Subscription};
+use iced::{Alignment, Border, Color, Element, Length, Settings, Size, Subscription};
 use iced_widget::scrollable::Direction;
+use iced_widget::Radio;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -385,7 +389,7 @@ impl OllamaChat {
         let uuid = Uuid::new_v4();
         Self {
             uuid,
-            display_name: format!("Chat-{}", uuid),
+            display_name: "New Unnamed Chat".to_string(),
             editing_name: None,
             state: ChatState::Idle,
             input_prompt: String::new(),
@@ -551,8 +555,14 @@ impl OllamaChat {
                     .iter()
                     .map(|entry| {
                         column![
-                            text(format!("You: {}", entry.prompt)),
-                            text(format!("AI: {}", entry.response)),
+                            text(format!("Prompt: {}", entry.prompt)),
+                            iced::widget::TextInput::new(
+                                "",
+                                &format!("{}: {}", self.model, entry.response)
+                            )
+                            .width(Length::Fill)
+                            .style(borderless_input_style()),
+                            // text(format!("AI: {}", entry.response)),
                         ]
                         .spacing(5)
                         .padding(10)
@@ -591,5 +601,21 @@ impl OllamaChat {
             .padding(20)
             .height(Length::Fill)
             .into()
+    }
+}
+
+fn borderless_input_style(
+) -> impl Fn(&iced::Theme, iced::widget::text_input::Status) -> iced::widget::text_input::Style {
+    |theme, _status| iced::widget::text_input::Style {
+        background: iced::Background::Color(Color::TRANSPARENT),
+        border: Border {
+            color: Color::TRANSPARENT,
+            width: 0.0,
+            radius: Radius::new(0),
+        },
+        icon: Color::TRANSPARENT,
+        placeholder: Color::TRANSPARENT,
+        value: theme.palette().text, // Use theme's text color
+        selection: Color::from_rgba8(0, 120, 212, 0.3),
     }
 }
