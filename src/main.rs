@@ -74,6 +74,7 @@ pub enum Message {
     DeleteChat(Uuid),
     ChangeAppState(AppState),
     ChangeTheme(iced::Theme),
+    ChangeDefaultUrl(String),
 }
 
 impl OllamaGUI {
@@ -176,6 +177,7 @@ impl OllamaGUI {
             }
             Message::ChangeAppState(app_state) => self.state = app_state,
             Message::ChangeTheme(theme) => self.theme = theme,
+            Message::ChangeDefaultUrl(url) => self.default_url = url,
         }
     }
 
@@ -184,7 +186,11 @@ impl OllamaGUI {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        Subscription::batch(self.chats.iter().map(|chat| chat.subscription()))
+        Subscription::batch(
+            self.chats
+                .iter()
+                .map(|chat| chat.subscription(self.default_url.clone())),
+        )
     }
 
     fn view(&self) -> Element<Message> {
@@ -197,7 +203,6 @@ impl OllamaGUI {
                             self.editing_chat == Some(chat.uuid),
                         )
                     }
-                    // .collect::<Vec<_>>()
                 })))
                 .spacing(10)
                 .width(Length::Fill)
@@ -239,18 +244,25 @@ impl OllamaGUI {
                     .padding(10)
                     .into()
             }
-            AppState::Settings => column![row![
-                button("Chats")
-                    .on_press(Message::ChangeAppState(AppState::Chat))
-                    .width(Length::Shrink)
-                    .padding([5, 10]),
-                button("Settings")
-                    .on_press(Message::ChangeAppState(AppState::Settings))
-                    .padding([5, 10]),
+            AppState::Settings => column![
+                row![
+                    button("Chats")
+                        .on_press(Message::ChangeAppState(AppState::Chat))
+                        .width(Length::Shrink)
+                        .padding([5, 10]),
+                    button("Settings")
+                        .on_press(Message::ChangeAppState(AppState::Settings))
+                        .padding([5, 10]),
+                ],
+                text!("Theme"),
                 iced::widget::pick_list(iced::Theme::ALL, Some(self.theme()), Message::ChangeTheme)
+                    .padding([5, 10])
+                    .width(Length::Shrink),
+                text!("Ollama URL"),
+                iced::widget::text_input("http://localhost:11434", &self.default_url)
+                    .on_input(Message::ChangeDefaultUrl)
+                    .width(Length::Fixed(300.0))
             ]
-            .padding([5, 10])
-            .width(Length::Shrink)]
             .spacing(10)
             .width(Length::FillPortion(1))
             .into(),
@@ -398,11 +410,12 @@ impl OllamaChat {
         }
     }
 
-    pub fn subscription(&self) -> Subscription<Message> {
+    pub fn subscription(&self, base_url: String) -> Subscription<Message> {
         if let ChatState::Streaming = self.state {
+            let api_url = format!("{}/api/generate", base_url);
             subscribe_to_stream(
                 self.uuid,
-                "http://localhost:11434/api/generate",
+                api_url,
                 &self.chat_entries.last().unwrap().prompt,
                 &self.model,
                 self.context.clone(),
