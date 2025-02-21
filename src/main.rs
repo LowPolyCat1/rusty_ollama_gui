@@ -44,7 +44,6 @@ fn windows_settings() -> iced::window::Settings {
         exit_on_close_request: true,
     }
 }
-
 #[derive(Debug)]
 struct OllamaGUI {
     chats: Vec<OllamaChat>,
@@ -60,7 +59,9 @@ pub enum Message {
     SelectChat(Uuid),
     PromptChanged(Uuid, String),
     StartRenameChat(Uuid),
-    FinishRenameChat(Uuid, String),
+    FinishRenameChat(Uuid),
+    CancelRenameChat(Uuid),
+    UpdateTempName(Uuid, String),
     DeleteChat(Uuid),
 }
 
@@ -92,15 +93,13 @@ impl OllamaGUI {
             chats[0].clone()
         };
 
-        let current_chat = initial_chat.uuid;
-
-        if chats.is_empty() {
-            chats.push(initial_chat);
-        }
-
         Self {
-            chats,
-            current_chat,
+            current_chat: initial_chat.uuid,
+            chats: if chats.is_empty() {
+                vec![initial_chat]
+            } else {
+                chats
+            },
             editing_chat: None,
         }
     }
@@ -132,13 +131,26 @@ impl OllamaGUI {
                 }
             }
             Message::StartRenameChat(uuid) => {
-                self.editing_chat = Some(uuid);
-            }
-            Message::FinishRenameChat(uuid, new_name) => {
                 if let Some(chat) = self.chats.iter_mut().find(|c| c.uuid == uuid) {
-                    chat.display_name = new_name;
+                    chat.start_rename();
+                    self.editing_chat = Some(uuid);
+                }
+            }
+            Message::UpdateTempName(uuid, name) => {
+                if let Some(chat) = self.chats.iter_mut().find(|c| c.uuid == uuid) {
+                    chat.update_temp_name(name);
+                }
+            }
+            Message::FinishRenameChat(uuid) => {
+                if let Some(chat) = self.chats.iter_mut().find(|c| c.uuid == uuid) {
+                    chat.finish_rename();
                     self.editing_chat = None;
-                    chat.save_chat_history();
+                }
+            }
+            Message::CancelRenameChat(uuid) => {
+                if let Some(chat) = self.chats.iter_mut().find(|c| c.uuid == uuid) {
+                    chat.cancel_rename();
+                    self.editing_chat = None;
                 }
             }
             Message::DeleteChat(uuid) => {
@@ -156,31 +168,28 @@ impl OllamaGUI {
     }
 
     fn view(&self) -> Element<Message> {
-        let sidebar_chats = scrollable(
-            column(
-                self.chats
-                    .iter()
-                    .map(|chat| {
-                        chat.sidebar_view(
-                            chat.uuid == self.current_chat,
-                            self.editing_chat == Some(chat.uuid),
-                        )
-                    })
-                    .collect::<Vec<_>>(),
-            )
-            .spacing(10),
-        )
-        .width(Length::Fixed(200.0))
+        let sidebar_chats = scrollable(column(self.chats.iter().map(|chat| {
+            {
+                chat.sidebar_view(
+                    chat.uuid == self.current_chat,
+                    self.editing_chat == Some(chat.uuid),
+                )
+            }
+            // .collect::<Vec<_>>()
+        })))
+        .spacing(10)
+        .width(Length::Fill)
         .height(Length::Fill);
 
-        let sidebar = column![
+        let left_sidebar = column![
             button("New Chat")
                 .on_press(Message::NewChat)
                 .width(Length::Shrink)
                 .padding([5, 10]),
             sidebar_chats
         ]
-        .spacing(10);
+        .spacing(10)
+        .width(Length::FillPortion(1));
 
         let current_chat = self
             .chats
@@ -190,11 +199,16 @@ impl OllamaGUI {
             .unwrap_or_else(|| column!().into());
 
         let main_content = container(current_chat)
-            .width(Length::Fill)
+            .width(Length::FillPortion(4))
             .height(Length::Fill)
             .align_x(Horizontal::Center);
 
-        row![sidebar, main_content].spacing(20).padding(10).into()
+        let right_sidebar = column![];
+
+        row![left_sidebar, main_content, right_sidebar]
+            .spacing(20)
+            .padding(10)
+            .into()
     }
 }
 
@@ -203,7 +217,6 @@ impl Default for OllamaGUI {
         Self::new()
     }
 }
-
 #[derive(Debug, Clone)]
 enum ChatState {
     Idle,
@@ -231,6 +244,7 @@ struct ChatEntry {
 struct OllamaChat {
     uuid: Uuid,
     display_name: String,
+    editing_name: Option<String>,
     state: ChatState,
     input_prompt: String,
     model: String,
@@ -244,6 +258,7 @@ impl OllamaChat {
         Self {
             uuid,
             display_name: format!("Chat-{}", uuid),
+            editing_name: None,
             state: ChatState::Idle,
             input_prompt: String::new(),
             model: "phi4".to_string(),
@@ -253,16 +268,37 @@ impl OllamaChat {
     }
 
     pub fn from_history(history: ChatHistory) -> Result<Self, uuid::Error> {
-        let uuid = Uuid::parse_str(&history.uuid)?;
         Ok(Self {
-            uuid,
+            uuid: Uuid::parse_str(&history.uuid)?,
             display_name: history.display_name,
+            editing_name: None,
             state: ChatState::Finished,
             input_prompt: String::new(),
             model: history.model,
             context: Some(history.context),
             chat_entries: history.chat,
         })
+    }
+
+    pub fn start_rename(&mut self) {
+        self.editing_name = Some(self.display_name.clone());
+    }
+
+    pub fn update_temp_name(&mut self, name: String) {
+        if let Some(editing_name) = &mut self.editing_name {
+            *editing_name = name;
+        }
+    }
+
+    pub fn finish_rename(&mut self) {
+        if let Some(name) = self.editing_name.take() {
+            self.display_name = name.trim().to_string();
+            self.save_chat_history();
+        }
+    }
+
+    pub fn cancel_rename(&mut self) {
+        self.editing_name = None;
     }
 
     pub fn start(&mut self) {
@@ -332,23 +368,26 @@ impl OllamaChat {
     }
 
     fn sidebar_view(&self, is_selected: bool, is_editing: bool) -> Element<Message> {
+        let current_name = self.editing_name.as_deref().unwrap_or(&self.display_name);
+
         let controls = if is_editing {
             row![
-                text_input("Chat Name", &self.display_name)
-                    .on_input(|s| Message::FinishRenameChat(self.uuid, s))
-                    .padding(5),
-                button("✓").on_press(Message::FinishRenameChat(
-                    self.uuid,
-                    self.display_name.clone()
-                ))
+                text_input("Chat Name", current_name)
+                    .on_input(|s| Message::UpdateTempName(self.uuid, s))
+                    .on_submit(Message::FinishRenameChat(self.uuid))
+                    .padding(5)
+                    .width(Length::Fill),
+                row![
+                    button("✓").on_press(Message::FinishRenameChat(self.uuid)),
+                    button("✖").on_press(Message::CancelRenameChat(self.uuid))
+                ]
+                .spacing(5)
             ]
-            .spacing(5)
+            .spacing(10)
         } else {
             row![
-                text(&self.display_name).width(Length::Fill),
-                button("✎")
-                    .on_press(Message::StartRenameChat(self.uuid))
-                    .padding(5),
+                text(current_name).width(Length::Fill),
+                button("✎").on_press(Message::StartRenameChat(self.uuid)),
                 button("🗑").on_press(Message::DeleteChat(self.uuid)) // .style(iced::theme::Button::Destructive)
             ]
             .spacing(5)
@@ -400,7 +439,7 @@ impl OllamaChat {
         )
         .height(Length::Fill);
 
-        let submit_message = {
+        let on_submit_message = {
             match self.state {
                 ChatState::Streaming => None,
                 _ => Some(Message::StartChat(self.uuid)),
@@ -410,7 +449,7 @@ impl OllamaChat {
         let input_row = row![
             text_input("Type your prompt...", &self.input_prompt)
                 .on_input(|s| Message::PromptChanged(self.uuid, s))
-                .on_submit_maybe(submit_message)
+                .on_submit_maybe(on_submit_message)
                 .padding(10)
                 .width(Length::Fill),
             match self.state {
