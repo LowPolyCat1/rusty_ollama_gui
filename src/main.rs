@@ -1,20 +1,18 @@
 use iced::alignment::Horizontal;
 use iced::futures::StreamExt;
-use iced::widget::{button, center, column, container, row, scrollable, text, Column};
+use iced::widget::{button, column, container, row, scrollable, text, text_input};
 use iced::window::settings::PlatformSpecific;
 use iced::window::Position;
 use iced::{Alignment, Element, Length, Settings, Size, Subscription};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use tracing;
-use tracing_subscriber;
-use uuid;
+use std::hash::Hash;
+use uuid::Uuid;
 
 mod streaming_ollama;
 use streaming_ollama::{subscribe_to_stream, Error as OllamaError, OllamaStreamProgress};
 
 pub fn main() -> iced::Result {
-    // tracing_subscriber::fmt().init();
     iced::application("Ollama GUI", OllamaGUI::update, OllamaGUI::view)
         .subscription(OllamaGUI::subscription)
         .settings(settings())
@@ -51,23 +49,22 @@ fn windows_settings() -> iced::window::Settings {
 #[derive(Debug)]
 struct OllamaGUI {
     chats: Vec<OllamaChat>,
-    current_chat: uuid::Uuid,
+    current_chat: Uuid,
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
     NewChat,
-    StartChat(uuid::Uuid),
-    ChatProgress((uuid::Uuid, Result<OllamaStreamProgress, OllamaError>)),
-    SelectChat(uuid::Uuid),
-    PromptChanged(uuid::Uuid, String),
+    StartChat(Uuid),
+    ChatProgress((Uuid, Result<OllamaStreamProgress, OllamaError>)),
+    SelectChat(Uuid),
+    PromptChanged(Uuid, String),
 }
 
 impl OllamaGUI {
     fn new() -> Self {
         let mut chats = Vec::new();
 
-        // Load existing chats from ./chats directory
         if let Ok(entries) = fs::read_dir("./chats") {
             for entry in entries.flatten() {
                 let path = entry.path();
@@ -86,7 +83,6 @@ impl OllamaGUI {
             }
         }
 
-        // If no chats found, create initial chat
         let initial_chat = if chats.is_empty() {
             OllamaChat::new()
         } else {
@@ -138,7 +134,7 @@ impl OllamaGUI {
     }
 
     fn view(&self) -> Element<Message> {
-        let sidebar = scrollable(
+        let sidebar_chats = scrollable(
             column(self.chats.iter().map(|chat| {
                 let is_current = chat.uuid == self.current_chat;
                 chat.sidebar_view(is_current)
@@ -148,28 +144,28 @@ impl OllamaGUI {
         .width(Length::Fixed(200.0))
         .height(Length::Fill);
 
+        let sidebar = column![
+            button("New Chat")
+                .on_press(Message::NewChat)
+                .width(Length::Shrink)
+                .padding([5, 10]),
+            sidebar_chats
+        ]
+        .spacing(10);
+
         let current_chat = self
             .chats
             .iter()
             .find(|c| c.uuid == self.current_chat)
             .map(|chat| chat.main_view())
-            .unwrap_or_else(|| column![].into());
+            .unwrap_or_else(|| column!().into());
 
         let main_content = container(current_chat)
             .width(Length::Fill)
             .height(Length::Fill)
-            .padding(20)
             .align_x(Horizontal::Center);
 
-        row![
-            sidebar,
-            container(main_content)
-                .width(Length::Fill)
-                .height(Length::Fill)
-        ]
-        .spacing(20)
-        .padding(10)
-        .into()
+        row![sidebar, main_content].spacing(20).padding(10).into()
     }
 }
 
@@ -182,8 +178,8 @@ impl Default for OllamaGUI {
 #[derive(Debug, Clone)]
 enum ChatState {
     Idle,
-    Streaming { output: String },
-    Finished { output: String, context: Vec<u64> },
+    Streaming,
+    Finished,
     Errored,
 }
 
@@ -196,7 +192,7 @@ struct ChatHistory {
     chat: Vec<ChatEntry>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct ChatEntry {
     prompt: String,
     response: String,
@@ -204,74 +200,67 @@ struct ChatEntry {
 
 #[derive(Debug, Clone)]
 struct OllamaChat {
-    uuid: uuid::Uuid,
+    uuid: Uuid,
     display_name: String,
     state: ChatState,
-    prompt: String,
+    input_prompt: String,
     model: String,
     context: Option<Vec<u64>>,
-    input_prompt: String,
+    chat_entries: Vec<ChatEntry>,
 }
 
 impl OllamaChat {
     pub fn new() -> Self {
-        let uuid = uuid::Uuid::new_v4();
+        let uuid = Uuid::new_v4();
         Self {
             uuid,
             display_name: format!("Chat-{}", uuid),
             state: ChatState::Idle,
-            prompt: "prompt".to_string(),
+            input_prompt: String::new(),
             model: "phi4".to_string(),
             context: None,
-            input_prompt: "prompt".to_string(),
-        }
-    }
-
-    pub fn start(&mut self) {
-        if let ChatState::Idle | ChatState::Finished { .. } | ChatState::Errored = self.state {
-            // Update the actual prompt with the input value
-            self.prompt = self.input_prompt.clone();
-            self.state = ChatState::Streaming {
-                output: String::new(),
-            };
+            chat_entries: Vec::new(),
         }
     }
 
     pub fn from_history(history: ChatHistory) -> Result<Self, uuid::Error> {
-        let uuid = uuid::Uuid::parse_str(&history.uuid)?;
-        let last_entry = history.chat.last();
-
+        let uuid = Uuid::parse_str(&history.uuid)?;
         Ok(Self {
             uuid,
             display_name: history.display_name,
-            state: ChatState::Finished {
-                output: last_entry.map(|e| e.response.clone()).unwrap_or_default(),
-                context: history.context.clone(),
-            },
-            prompt: last_entry
-                .map(|e| e.prompt.clone())
-                .unwrap_or_else(|| "prompt".to_string()),
+            state: ChatState::Finished,
+            input_prompt: String::new(),
             model: history.model,
             context: Some(history.context),
-            input_prompt: last_entry
-                .map(|e| e.prompt.clone())
-                .unwrap_or_else(|| "prompt".to_string()),
+            chat_entries: history.chat,
         })
     }
 
+    pub fn start(&mut self) {
+        if matches!(
+            self.state,
+            ChatState::Idle | ChatState::Finished | ChatState::Errored
+        ) {
+            self.chat_entries.push(ChatEntry {
+                prompt: self.input_prompt.clone(),
+                response: String::new(),
+            });
+            self.state = ChatState::Streaming;
+            self.input_prompt.clear();
+        }
+    }
+
     pub fn progress(&mut self, progress: Result<OllamaStreamProgress, OllamaError>) {
-        if let ChatState::Streaming { ref mut output } = self.state {
+        if let ChatState::Streaming = self.state {
             match progress {
                 Ok(OllamaStreamProgress::Streaming { token }) => {
-                    output.push_str(&token);
+                    if let Some(last_entry) = self.chat_entries.last_mut() {
+                        last_entry.response.push_str(&token);
+                    }
                 }
                 Ok(OllamaStreamProgress::Finished { context }) => {
-                    let final_output = std::mem::replace(output, String::new());
-                    self.context = Some(context.clone());
-                    self.state = ChatState::Finished {
-                        output: final_output,
-                        context,
-                    };
+                    self.context = Some(context);
+                    self.state = ChatState::Finished;
                     self.save_chat_history();
                 }
                 Err(_) => {
@@ -282,48 +271,30 @@ impl OllamaChat {
     }
 
     fn save_chat_history(&self) {
-        if let ChatState::Finished { output, context } = &self.state {
-            let chat_entry = ChatEntry {
-                prompt: self.prompt.clone(),
-                response: output.clone(),
-            };
+        let file_path = format!("./chats/{}.json", self.uuid);
+        let _ = std::fs::create_dir_all("./chats");
 
-            let file_path = format!("./chats/{}.json", self.uuid);
-            let _ = std::fs::create_dir_all("./chats");
+        let chat_history = ChatHistory {
+            display_name: self.display_name.clone(),
+            uuid: self.uuid.to_string(),
+            context: self.context.clone().unwrap_or_default(),
+            model: self.model.clone(),
+            chat: self.chat_entries.clone(),
+        };
 
-            let mut chat_history = match std::fs::File::open(&file_path) {
-                Ok(file) => serde_json::from_reader(file).unwrap_or_else(|_| ChatHistory {
-                    display_name: self.display_name.clone(),
-                    uuid: self.uuid.to_string(),
-                    context: vec![],
-                    model: self.model.clone(),
-                    chat: vec![],
-                }),
-                Err(_) => ChatHistory {
-                    display_name: self.display_name.clone(),
-                    uuid: self.uuid.to_string(),
-                    context: vec![],
-                    model: self.model.clone(),
-                    chat: vec![],
-                },
-            };
-
-            chat_history.context = context.clone();
-            chat_history.chat.push(chat_entry);
-
-            if let Ok(file) = std::fs::File::create(&file_path) {
-                let _ = serde_json::to_writer_pretty(file, &chat_history);
-            }
+        if let Ok(file) = std::fs::File::create(&file_path) {
+            let _ = serde_json::to_writer_pretty(file, &chat_history);
         }
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        if let ChatState::Streaming { .. } = self.state {
+        if let ChatState::Streaming = self.state {
             subscribe_to_stream(
                 self.uuid,
                 "http://localhost:11434/api/generate",
-                &self.prompt,
+                &self.chat_entries.last().unwrap().prompt,
                 &self.model,
+                self.context.clone(),
             )
             .map(Message::ChatProgress)
         } else {
@@ -334,21 +305,17 @@ impl OllamaChat {
     fn sidebar_view(&self, is_selected: bool) -> Element<Message> {
         let status_icon = match self.state {
             ChatState::Idle => text("●"),
-            ChatState::Streaming { .. } => text("↻"),
-            ChatState::Finished { .. } => text("✓"),
+            ChatState::Streaming => text("↻"),
+            ChatState::Finished => text("✓"),
             ChatState::Errored => text("⚠"),
         };
 
-        let content = row![status_icon, text(&self.display_name).size(14),]
+        let content = row![status_icon, text(&self.display_name).size(14)]
             .spacing(10)
             .align_y(Alignment::Center);
 
         if is_selected {
-            container(content)
-                // .style(iced::theme::Container::Box)
-                .padding(5)
-                .width(Length::Fill)
-                .into()
+            container(content).padding(5).width(Length::Fill).into()
         } else {
             button(content)
                 .on_press(Message::SelectChat(self.uuid))
@@ -359,39 +326,42 @@ impl OllamaChat {
     }
 
     fn main_view(&self) -> Element<Message> {
-        let controls = match &self.state {
-            ChatState::Idle => column![
-                button("Start Chat").on_press(Message::StartChat(self.uuid)),
-                text(format!("Model: {}", &self.model))
-            ],
-            ChatState::Streaming { output } => column![
-                // text("Streaming..."),
-                text(output).width(500),
-                button("Stop").on_press(Message::SelectChat(self.uuid)),
-            ],
-            ChatState::Finished { output, context } => column![
-                // text("Completed:"),
-                text(output),
-                // text(format!("Context: {:?}", context)),
-                button("Restart").on_press(Message::StartChat(self.uuid))
-            ],
-            ChatState::Errored => column![
-                text("Error occurred"),
-                button("Retry").on_press(Message::StartChat(self.uuid))
-            ],
-        };
-        let prompt_input = iced::widget::text_input("Type your prompt...", &self.input_prompt)
+        let chat_log = scrollable(
+            column(self.chat_entries.iter().map(|entry| {
+                let column: Element<Message> = column![
+                    text(format!("You: {}", entry.prompt)).size(14),
+                    text(format!("AI: {}", entry.response)).size(14),
+                ]
+                .spacing(5)
+                .padding(10)
+                .into();
+                column
+            }))
+            .spacing(10),
+        )
+        .height(Length::Fill);
+
+        let prompt_input = text_input("Type your prompt...", &self.input_prompt)
             .on_input(move |text| Message::PromptChanged(self.uuid, text))
             .padding(10)
             .size(16);
 
-        column![
-            text(&self.display_name).size(24),
-            controls.spacing(20),
-            prompt_input
+        let controls = row![
+            prompt_input,
+            match self.state {
+                ChatState::Idle => button("Send").on_press(Message::StartChat(self.uuid)),
+                ChatState::Streaming => button("Stop").on_press(Message::SelectChat(self.uuid)),
+                ChatState::Finished => button("Send").on_press(Message::StartChat(self.uuid)),
+                ChatState::Errored => button("Retry").on_press(Message::StartChat(self.uuid)),
+            }
         ]
-        .spacing(20)
-        .align_x(Alignment::Start)
-        .into()
+        .spacing(10)
+        .align_y(Alignment::Center);
+
+        column![text(&self.display_name).size(24), chat_log, controls]
+            .spacing(20)
+            .padding(20)
+            .height(Length::Fill)
+            .into()
     }
 }

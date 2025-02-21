@@ -28,11 +28,17 @@ pub fn subscribe_to_stream<I: 'static + Hash + Copy + Send + Sync, T: ToString>(
     url: T,
     prompt: &str,
     model: &str,
+    context: Option<Vec<u64>>,
 ) -> Subscription<(I, Result<OllamaStreamProgress, Error>)> {
     Subscription::run_with_id(
         id,
-        fetch_and_stream_response(url.to_string(), prompt.to_string(), model.to_string())
-            .map(move |progress| (id, progress)),
+        fetch_and_stream_response(
+            url.to_string(),
+            prompt.to_string(),
+            model.to_string(),
+            context,
+        )
+        .map(move |progress| (id, progress)),
     )
 }
 
@@ -40,17 +46,21 @@ fn fetch_and_stream_response(
     url: String,
     prompt: String,
     model: String,
+    context: Option<Vec<u64>>,
 ) -> impl Stream<Item = Result<OllamaStreamProgress, Error>> {
     try_channel(1, move |mut output| async move {
         let client = reqwest::Client::new();
-        let response = client
-            .post(&url)
-            .json(&json!({
-                "model": model,
-                "prompt": prompt
-            }))
-            .send()
-            .await?;
+        let mut body = json!({
+            "model": model,
+            "prompt": prompt,
+            "stream": true
+        });
+
+        if let Some(context) = context {
+            body["context"] = json!(context);
+        }
+
+        let response = client.post(&url).json(&body).send().await?;
 
         let mut stream = response.bytes_stream();
         while let Some(chunk) = stream.next().await {
