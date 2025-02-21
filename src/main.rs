@@ -6,7 +6,6 @@ use iced::window::Position;
 use iced::{Alignment, Element, Length, Settings, Size, Subscription};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::hash::Hash;
 use uuid::Uuid;
 
 mod streaming_ollama;
@@ -50,6 +49,7 @@ fn windows_settings() -> iced::window::Settings {
 struct OllamaGUI {
     chats: Vec<OllamaChat>,
     current_chat: Uuid,
+    editing_chat: Option<Uuid>,
 }
 
 #[derive(Debug, Clone)]
@@ -59,6 +59,9 @@ pub enum Message {
     ChatProgress((Uuid, Result<OllamaStreamProgress, OllamaError>)),
     SelectChat(Uuid),
     PromptChanged(Uuid, String),
+    StartRenameChat(Uuid),
+    FinishRenameChat(Uuid, String),
+    DeleteChat(Uuid),
 }
 
 impl OllamaGUI {
@@ -98,6 +101,7 @@ impl OllamaGUI {
         Self {
             chats,
             current_chat,
+            editing_chat: None,
         }
     }
 
@@ -120,11 +124,29 @@ impl OllamaGUI {
             }
             Message::SelectChat(id) => {
                 self.current_chat = id;
+                self.editing_chat = None;
             }
             Message::PromptChanged(id, new_prompt) => {
                 if let Some(chat) = self.chats.iter_mut().find(|c| c.uuid == id) {
                     chat.input_prompt = new_prompt;
                 }
+            }
+            Message::StartRenameChat(uuid) => {
+                self.editing_chat = Some(uuid);
+            }
+            Message::FinishRenameChat(uuid, new_name) => {
+                if let Some(chat) = self.chats.iter_mut().find(|c| c.uuid == uuid) {
+                    chat.display_name = new_name;
+                    self.editing_chat = None;
+                    chat.save_chat_history();
+                }
+            }
+            Message::DeleteChat(uuid) => {
+                self.chats.retain(|c| c.uuid != uuid);
+                if self.current_chat == uuid {
+                    self.current_chat = self.chats.first().map(|c| c.uuid).unwrap_or(Uuid::nil());
+                }
+                let _ = std::fs::remove_file(format!("./chats/{}.json", uuid));
             }
         }
     }
@@ -135,10 +157,17 @@ impl OllamaGUI {
 
     fn view(&self) -> Element<Message> {
         let sidebar_chats = scrollable(
-            column(self.chats.iter().map(|chat| {
-                let is_current = chat.uuid == self.current_chat;
-                chat.sidebar_view(is_current)
-            }))
+            column(
+                self.chats
+                    .iter()
+                    .map(|chat| {
+                        chat.sidebar_view(
+                            chat.uuid == self.current_chat,
+                            self.editing_chat == Some(chat.uuid),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            )
             .spacing(10),
         )
         .width(Length::Fixed(200.0))
@@ -302,7 +331,29 @@ impl OllamaChat {
         }
     }
 
-    fn sidebar_view(&self, is_selected: bool) -> Element<Message> {
+    fn sidebar_view(&self, is_selected: bool, is_editing: bool) -> Element<Message> {
+        let controls = if is_editing {
+            row![
+                text_input("Chat Name", &self.display_name)
+                    .on_input(|s| Message::FinishRenameChat(self.uuid, s))
+                    .padding(5),
+                button("✓").on_press(Message::FinishRenameChat(
+                    self.uuid,
+                    self.display_name.clone()
+                ))
+            ]
+            .spacing(5)
+        } else {
+            row![
+                text(&self.display_name).width(Length::Fill),
+                button("✎")
+                    .on_press(Message::StartRenameChat(self.uuid))
+                    .padding(5),
+                button("🗑").on_press(Message::DeleteChat(self.uuid)) // .style(iced::theme::Button::Destructive)
+            ]
+            .spacing(5)
+        };
+
         let status_icon = match self.state {
             ChatState::Idle => text("●"),
             ChatState::Streaming => text("↻"),
@@ -310,12 +361,16 @@ impl OllamaChat {
             ChatState::Errored => text("⚠"),
         };
 
-        let content = row![status_icon, text(&self.display_name).size(14)]
+        let content = row![status_icon, controls]
             .spacing(10)
             .align_y(Alignment::Center);
 
         if is_selected {
-            container(content).padding(5).width(Length::Fill).into()
+            container(content)
+                // .style(iced::theme::Container::Box)
+                .padding(5)
+                .width(Length::Fill)
+                .into()
         } else {
             button(content)
                 .on_press(Message::SelectChat(self.uuid))
@@ -327,46 +382,47 @@ impl OllamaChat {
 
     fn main_view(&self) -> Element<Message> {
         let chat_log = scrollable(
-            column(self.chat_entries.iter().map(|entry| {
-                let column: Element<Message> = column![
-                    text(format!("You: {}", entry.prompt)).size(14),
-                    text(format!("AI: {}", entry.response)).size(14),
-                ]
-                .spacing(5)
-                .padding(10)
-                .into();
-                column
-            }))
+            column(
+                self.chat_entries
+                    .iter()
+                    .map(|entry| {
+                        column![
+                            text(format!("You: {}", entry.prompt)),
+                            text(format!("AI: {}", entry.response)),
+                        ]
+                        .spacing(5)
+                        .padding(10)
+                        .into()
+                    })
+                    .collect::<Vec<_>>(),
+            )
             .spacing(10),
         )
         .height(Length::Fill);
 
-        let submit_msg = {
+        let submit_message = {
             match self.state {
                 ChatState::Streaming => None,
                 _ => Some(Message::StartChat(self.uuid)),
             }
         };
 
-        let prompt_input = text_input("Type your prompt...", &self.input_prompt)
-            .on_input(move |text| Message::PromptChanged(self.uuid, text))
-            .on_submit_maybe(submit_msg)
-            .padding(10)
-            .size(16);
-
-        let controls = row![
-            prompt_input,
+        let input_row = row![
+            text_input("Type your prompt...", &self.input_prompt)
+                .on_input(|s| Message::PromptChanged(self.uuid, s))
+                .on_submit_maybe(submit_message)
+                .padding(10)
+                .width(Length::Fill),
             match self.state {
-                ChatState::Idle => button("Send").on_press(Message::StartChat(self.uuid)),
+                ChatState::Idle | ChatState::Finished =>
+                    button("Send").on_press(Message::StartChat(self.uuid)),
                 ChatState::Streaming => button("Stop").on_press(Message::SelectChat(self.uuid)),
-                ChatState::Finished => button("Send").on_press(Message::StartChat(self.uuid)),
                 ChatState::Errored => button("Retry").on_press(Message::StartChat(self.uuid)),
             }
         ]
-        .spacing(10)
-        .align_y(Alignment::Center);
+        .spacing(10);
 
-        column![text(&self.display_name).size(24), chat_log, controls]
+        column![text(&self.display_name).size(24), chat_log, input_row]
             .spacing(20)
             .padding(20)
             .height(Length::Fill)
