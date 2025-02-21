@@ -15,6 +15,7 @@ pub fn main() -> iced::Result {
         .subscription(OllamaGUI::subscription)
         .settings(settings())
         .window(windows_settings())
+        .theme(OllamaGUI::theme)
         .run()
 }
 
@@ -56,6 +57,7 @@ struct OllamaGUI {
     editing_chat: Option<Uuid>,
     state: AppState,
     default_url: String,
+    theme: iced::Theme,
 }
 
 #[derive(Debug, Clone)]
@@ -71,6 +73,7 @@ pub enum Message {
     UpdateTempName(Uuid, String),
     DeleteChat(Uuid),
     ChangeAppState(AppState),
+    ChangeTheme(iced::Theme),
 }
 
 impl OllamaGUI {
@@ -111,6 +114,7 @@ impl OllamaGUI {
             editing_chat: None,
             state: AppState::Chat,
             default_url: "http://localhost:11434".to_string(),
+            theme: iced::Theme::GruvboxDark,
         }
     }
 
@@ -171,7 +175,12 @@ impl OllamaGUI {
                 let _ = std::fs::remove_file(format!("./chats/{}.json", uuid));
             }
             Message::ChangeAppState(app_state) => self.state = app_state,
+            Message::ChangeTheme(theme) => self.theme = theme,
         }
+    }
+
+    fn theme(&self) -> iced::Theme {
+        self.theme.clone()
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -237,7 +246,8 @@ impl OllamaGUI {
                     .padding([5, 10]),
                 button("Settings")
                     .on_press(Message::ChangeAppState(AppState::Settings))
-                    .padding([5, 10])
+                    .padding([5, 10]),
+                iced::widget::pick_list(iced::Theme::ALL, Some(self.theme()), Message::ChangeTheme)
             ]
             .padding([5, 10])
             .width(Length::Shrink)]
