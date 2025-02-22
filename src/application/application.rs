@@ -14,9 +14,32 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize)]
+struct LocalModels {
+    models: Vec<ModelInfo>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ModelInfo {
+    name: String,
+    modified_at: String,
+    size: u64,
+    digest: String,
+    details: ModelDetails,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ModelDetails {
+    format: String,
+    family: String,
+    parameter_size: String,
+    quantization_level: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AppSettings {
     theme: String,
     default_url: String,
+    selected_model: String,
 }
 
 impl Default for AppSettings {
@@ -24,6 +47,7 @@ impl Default for AppSettings {
         Self {
             theme: format!("{:?}", IcedTheme::KanagawaDragon),
             default_url: "http://localhost:11434".to_string(),
+            selected_model: "llama3.2".to_string(),
         }
     }
 }
@@ -44,6 +68,8 @@ pub struct OllamaGUI {
     theme: iced::Theme,
     download_model_input: String,
     download_progress: Vec<DownloadProgress>,
+    local_models: Vec<String>,
+    selected_model: String,
 }
 
 #[derive(Debug, Clone)]
@@ -74,6 +100,8 @@ pub enum Message {
     StartDownloadModel,
     DownloadProgress(Uuid, Result<DownloadProgressUpdate, Error>),
     CancelDownload(Uuid),
+    ChangeSelectedModel(String),
+    RefreshModels,
 }
 
 #[derive(Debug, Clone)]
@@ -125,11 +153,31 @@ impl OllamaGUI {
         }
     }
 
+    fn load_local_models(&mut self) {
+        let client = reqwest::blocking::Client::new();
+        let url = format!("{}/api/tags", self.default_url);
+
+        match client.get(&url).send() {
+            Ok(response) => {
+                if let Ok(models) = response.json::<LocalModels>() {
+                    self.local_models = models.models.iter().map(|m| m.name.clone()).collect();
+
+                    // Save to models.json
+                    let path = PathBuf::from("./settings/models.json");
+                    let _ = fs::create_dir_all("./settings");
+                    let _ = fs::write(path, serde_json::to_string_pretty(&models).unwrap());
+                }
+            }
+            Err(e) => eprintln!("Error loading models: {}", e),
+        }
+    }
+
     pub fn save_settings(&self) {
         let path = PathBuf::from("./settings/settings.json");
         let settings = AppSettings {
             theme: format!("{:?}", self.theme),
             default_url: self.default_url.clone(),
+            selected_model: self.selected_model.clone(),
         };
         let _ = fs::write(path, serde_json::to_string_pretty(&settings).unwrap());
     }
@@ -166,12 +214,12 @@ impl OllamaGUI {
         }
 
         let initial_chat = if chats.is_empty() {
-            OllamaChat::new()
+            OllamaChat::new("llama3.2:latest".to_string())
         } else {
             chats[0].clone()
         };
 
-        Self {
+        let mut gui = Self {
             current_chat: initial_chat.uuid,
             chats: if chats.is_empty() {
                 vec![initial_chat]
@@ -184,13 +232,17 @@ impl OllamaGUI {
             theme,
             download_model_input: String::new(),
             download_progress: Vec::new(),
-        }
+            local_models: Vec::new(),
+            selected_model: settings.selected_model,
+        };
+        gui.load_local_models();
+        gui
     }
 
     pub fn update(&mut self, message: Message) {
         match message {
             Message::NewChat => {
-                let new_chat = OllamaChat::new();
+                let new_chat = OllamaChat::new(self.selected_model.clone());
                 self.current_chat = new_chat.uuid;
                 self.chats.push(new_chat);
             }
@@ -290,6 +342,14 @@ impl OllamaGUI {
             },
             Message::CancelDownload(id) => {
                 self.download_progress.retain(|dl| dl.id != id);
+            }
+            Message::ChangeSelectedModel(model) => {
+                self.selected_model = model;
+                self.save_settings();
+            }
+
+            Message::RefreshModels => {
+                self.load_local_models();
             }
         }
     }
@@ -439,6 +499,15 @@ impl OllamaGUI {
                             .on_input(Message::ChangeDefaultUrl)
                             .padding(5)
                             .width(Length::Fixed(300.0)),
+                        text("Select Model").size(16),
+                        iced::widget::pick_list(
+                            &*self.local_models,
+                            Some(&self.selected_model),
+                            Message::ChangeSelectedModel
+                        )
+                        .padding([5, 10])
+                        .width(Length::Shrink),
+                        button("Refresh Models").on_press(Message::RefreshModels),
                         text("Download Model").size(16),
                         row![
                             text_input("Model name", &self.download_model_input)
@@ -512,7 +581,7 @@ struct OllamaChat {
 }
 
 impl OllamaChat {
-    pub fn new() -> Self {
+    pub fn new(model: String) -> Self {
         let uuid = Uuid::new_v4();
         Self {
             uuid,
@@ -520,7 +589,7 @@ impl OllamaChat {
             editing_name: None,
             state: ChatState::Idle,
             input_prompt: String::new(),
-            model: "phi4".to_string(),
+            model,
             context: None,
             chat_entries: Vec::new(),
         }
