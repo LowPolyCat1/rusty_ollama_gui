@@ -106,6 +106,8 @@ cargo build --release
   - [x] Getting Local Models
   - [x] Add Selection to Settings page
 
+<!-- ### Currently Working on  -->
+
 ### Possible Future Features
 
 - [ ] Searching LLMs from Ollama library
