@@ -99,15 +99,15 @@ cargo build --release
 - [x] Settings Page
 - [x] Changeable API endpoint
 - [x] Changeable Themes
+- [x] Downloading Models
+  - [x] Downloading Model
+  - [x] Progress Bar
 
 ### Currently working on
 
 - [ ] Specifying Model
   - [ ] Getting Local Models
   - [ ] Add Selection to Settings page
-- [ ] Downloading Models
-  - [ ] Downloading Model
-  - [ ] Progress Bar
 
 ### Possible Future Features
 
