@@ -109,7 +109,7 @@ pub enum DownloadProgressUpdate {
     Progress {
         status: String,
         total: u64,
-        completed: u64,
+        completed: u64, //will probably use bool in the future
     },
     Finished,
 }
@@ -122,9 +122,9 @@ pub enum OllamaStreamProgress {
 
 #[derive(Debug, Clone)]
 pub enum Error {
-    RequestFailed(Arc<reqwest::Error>),
-    ParseError(Arc<serde_json::Error>),
-    ChannelError(Arc<futures::channel::mpsc::SendError>),
+    RequestFailed(Arc<reqwest::Error>), // keep for future debugging
+    ParseError(Arc<serde_json::Error>), // keep for future debugging
+    ChannelError(Arc<futures::channel::mpsc::SendError>), // keep for future debugging
 }
 
 impl From<reqwest::Error> for Error {
