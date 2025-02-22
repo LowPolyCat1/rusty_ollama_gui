@@ -43,7 +43,6 @@ pub struct OllamaGUI {
     default_url: String,
     theme: iced::Theme,
     download_model_input: String,
-    // Support multiple downloads concurrently.
     download_progress: Vec<DownloadProgress>,
 }
 
@@ -74,7 +73,6 @@ pub enum Message {
     DownloadModelInputChanged(String),
     StartDownloadModel,
     DownloadProgress(Uuid, Result<DownloadProgressUpdate, Error>),
-    // New message variant for canceling a download.
     CancelDownload(Uuid),
 }
 
@@ -291,7 +289,6 @@ impl OllamaGUI {
                 }
             },
             Message::CancelDownload(id) => {
-                // Remove the download entry when the user cancels it.
                 self.download_progress.retain(|dl| dl.id != id);
             }
         }
