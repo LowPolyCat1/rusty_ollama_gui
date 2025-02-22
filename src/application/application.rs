@@ -1,11 +1,16 @@
 use iced::alignment::Horizontal;
 use iced::border::Radius;
+use iced::futures::{SinkExt, Stream, StreamExt};
+use iced::stream::try_channel;
 use iced::theme::Theme as IcedTheme;
 use iced::widget::{button, column, container, row, scrollable, text, text_input};
 use iced::{Alignment, Border, Color, Element, Length, Subscription};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::fs;
+use std::hash::Hash;
 use std::path::PathBuf;
+use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -574,13 +579,6 @@ fn borderless_input_style(
         selection: Color::from_rgba8(0, 120, 212, 0.3),
     }
 }
-
-use iced::futures::{SinkExt, Stream, StreamExt};
-use iced::stream::try_channel;
-// use iced::Subscription;
-use serde_json::json;
-use std::hash::Hash;
-use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub enum OllamaStreamProgress {
