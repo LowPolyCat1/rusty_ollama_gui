@@ -2,3 +2,5 @@
 /logs/*.log.*
 *.env
 Cargo.lock
+/chats
+/settings

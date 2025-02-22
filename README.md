@@ -92,11 +92,50 @@ cargo build --release
 <!-- ROADMAP -->
 ## Roadmap
 
-// TODO
+### Already been done
 
-See the [open issues](https://github.com/lowpolycat1/rusty_ollama/issues) for full list of proposed features.
+- [x] Stream Response Display
+- [x] Multiple Streams at once
+- [x] Settings Page
+  - [x] Settings Page
+  - [x] Loading Settings
+  - [x] Saving Settings
+- [x] Changeable API endpoint
+- [x] Changeable Themes
+- [x] Downloading Models
+  - [x] Downloading Model
+  - [x] Progress Bar
+- [x] Specifying Model
+  - [x] Getting Local Models
+  - [x] Add Selection to Settings page
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+<!-- ### Currently Working on  -->
+
+### Possible Future Features
+
+- [ ] Searching LLMs from Ollama library
+- [ ] Selectable Multi-line responses
+- [ ] Markdown format support
+- [ ] Copy to Clipboard
+  - [ ] Icon
+  - [ ] Functionality
+- [ ] Custom Themes
+- [ ] Image uploading
+- [ ] Extern API Endpoints (ChatGPT, Deepseek, Claude, etc.)
+- [ ] Password requirement to open app & chats
+  - [ ] Password Hashing
+  - [ ] Chat encryption
+  - [ ] Chat decryption
+- [ ] Automatic Updates
+- [ ] Voice processing
+- [ ] Video processing
+- [ ] Chat Sharing
+- [ ] Switching model of specific chat
+- [ ] (Text based) Context transfer when switching model
+
+See the [open issues](https://github.com/lowpolycat1/rusty_ollama_gui/issues) for full list of proposed features.
+
+ <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- CONTRIBUTING -->
 ## Contributing
@@ -116,8 +155,8 @@ Don't forget to give the project a star! Thanks again!
 
 ### Top contributors
 
-<a href="https://github.com/lowpolycat1/rusty_ollama/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=lowpolycat1/rusty_ollama" alt="contrib.rocks image" />
+<a href="https://github.com/lowpolycat1/rusty_ollama_gui/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=lowpolycat1/rusty_ollama_gui" alt="contrib.rocks image" />
 </a>
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
@@ -134,7 +173,7 @@ Distributed under the MIT License. See `LICENSE.txt` for more information.
 
 lowpolycat1 - @acrylic_spark (discord)
 
-Project Link: [https://github.com/lowpolycat1/rusty_ollama](https://github.com/lowpolycat1/rusty_ollama)
+Project Link: [https://github.com/lowpolycat1/rusty_ollama_gui](https://github.com/lowpolycat1/rusty_ollama_gui)
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 

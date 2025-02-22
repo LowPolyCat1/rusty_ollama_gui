@@ -10,6 +10,32 @@ publish = false
 
 
 [dependencies]
+iced = { version = "0.13.1", features = [
+    "image",
+    "tokio",
+    # "svg",
+    # "canvas",
+    # "multi-window",
+    # "markdown",
+] }
+iced_aw = { version = "0.12.0" }
+tokio = { version = "1.43.0", features = ["full"] }
+reqwest = { version = "0.12.12", default-features = false, features = [
+    "stream",
+    "rustls-tls",
+    "json",
+    "blocking",
+] }
+uuid = { version = "1.14.0", features = ["v4", "serde"] }
+serde_json = { version = "1.0.139" }
+serde = { version = "1.0.218", features = ["derive"] }
+# tracing = { version = "0.1.41" }
+# tracing-subscriber = { version = "0.3.19" }
+# iced_widget = { version = "0.13.4", features = ["markdown"] }
+
+
+[target.'cfg(windows)'.build-dependencies]
+windows_exe_info = "0.4.2"
 
 
 [dev-dependencies]
