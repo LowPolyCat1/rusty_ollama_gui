@@ -92,7 +92,44 @@ cargo build --release
 <!-- ROADMAP -->
 ## Roadmap
 
-// TODO
+### Already been done
+
+- [x] Stream Response Display
+- [x] Multiple Streams at once
+- [x] Settings Page
+- [x] Changeable API endpoint
+- [x] Changeable Themes
+
+### Currently working on
+
+- [ ] Specifying Model
+  - [ ] Getting Local Models
+  - [ ] Add Selection to Settings page
+- [ ] Downloading Models
+  - [ ] Downloading Model
+  - [ ] Progress Bar
+
+### Possible Future Features
+
+- [ ] Searching LLMs from Ollama library
+- [ ] Selectable Multi-line responses
+- [ ] Markdown format support
+- [ ] Copy to Clipboard
+  - [ ] Icon
+  - [ ] Functionality
+- [ ] Custom Themes
+- [ ] Image uploading
+- [ ] Extern API Endpoints (ChatGPT, Deepseek, Claude, etc.)
+- [ ] Password requirement to open app & chats
+  - [ ] Password Hashing
+  - [ ] Chat encryption
+  - [ ] Chat decryption
+- [ ] Automatic Updates
+- [ ] Voice processing
+- [ ] Video processing
+- [ ] Chat Sharing
+- [ ] Switching model of specific chat
+- [ ] (Text based) Context transfer when switching model
 
 See the [open issues](https://github.com/lowpolycat1/rusty_ollama_gui/issues) for full list of proposed features.
 
