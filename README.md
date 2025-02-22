@@ -97,6 +97,9 @@ cargo build --release
 - [x] Stream Response Display
 - [x] Multiple Streams at once
 - [x] Settings Page
+  - [x] Settings Page
+  - [x] Loading Settings
+  - [x] Saving Settings
 - [x] Changeable API endpoint
 - [x] Changeable Themes
 - [x] Downloading Models
@@ -132,7 +135,7 @@ cargo build --release
 
 See the [open issues](https://github.com/lowpolycat1/rusty_ollama_gui/issues) for full list of proposed features.
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+ <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- CONTRIBUTING -->
 ## Contributing
