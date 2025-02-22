@@ -43,16 +43,17 @@ pub struct OllamaGUI {
     default_url: String,
     theme: iced::Theme,
     download_model_input: String,
-    download_progress: Option<DownloadProgress>,
+    // Modified: Now support multiple concurrent downloads
+    download_progress: Vec<DownloadProgress>,
 }
 
 #[derive(Debug, Clone)]
-struct DownloadProgress {
-    id: Uuid,
-    model: String,
-    status: String,
-    total: u64,
-    completed: u64,
+pub struct DownloadProgress {
+    pub id: Uuid,
+    pub model: String,
+    pub status: String,
+    pub total: u64,
+    pub completed: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -72,7 +73,8 @@ pub enum Message {
     ChangeDefaultUrl(String),
     DownloadModelInputChanged(String),
     StartDownloadModel,
-    DownloadProgress(Result<DownloadProgressUpdate, Error>),
+    // Modified: Include the download id with the progress update.
+    DownloadProgress(Uuid, Result<DownloadProgressUpdate, Error>),
 }
 
 #[derive(Debug, Clone)]
@@ -181,7 +183,7 @@ impl OllamaGUI {
             default_url: settings.default_url,
             theme,
             download_model_input: String::new(),
-            download_progress: None,
+            download_progress: Vec::new(), // Modified: no longer Option, now an empty vector
         }
     }
 
@@ -254,33 +256,36 @@ impl OllamaGUI {
                 self.download_model_input = input;
             }
             Message::StartDownloadModel => {
-                if !self.download_model_input.is_empty() && self.download_progress.is_none() {
-                    self.download_progress = Some(DownloadProgress {
+                if !self.download_model_input.is_empty() {
+                    // Create a new download progress entry and add it to the vector.
+                    self.download_progress.push(DownloadProgress {
                         id: Uuid::new_v4(),
                         model: self.download_model_input.clone(),
                         status: "Starting download...".into(),
                         total: 0,
                         completed: 0,
                     });
+                    // Optionally clear the input so a new model can be entered.
+                    self.download_model_input.clear();
                 }
             }
-            Message::DownloadProgress(result) => match result {
+            Message::DownloadProgress(id, result) => match result {
                 Ok(DownloadProgressUpdate::Progress {
                     status,
                     total,
                     completed,
                 }) => {
-                    if let Some(dl) = &mut self.download_progress {
+                    if let Some(dl) = self.download_progress.iter_mut().find(|d| d.id == id) {
                         dl.status = status;
                         dl.total = total;
                         dl.completed = completed;
                     }
                 }
                 Ok(DownloadProgressUpdate::Finished) => {
-                    self.download_progress = None;
+                    self.download_progress.retain(|dl| dl.id != id);
                 }
                 Err(e) => {
-                    if let Some(dl) = &mut self.download_progress {
+                    if let Some(dl) = self.download_progress.iter_mut().find(|d| d.id == id) {
                         dl.status = format!("Error: {:?}", e);
                     }
                 }
@@ -298,16 +303,17 @@ impl OllamaGUI {
             .iter()
             .map(|chat| chat.subscription(self.default_url.clone()));
 
-        let download_sub = self.download_progress.as_ref().map(|dl| {
+        // Modified: create a subscription for each active download
+        let download_subs = self.download_progress.iter().map(|dl| {
             subscribe_to_download(
                 dl.id,
                 format!("{}/api/pull", self.default_url),
                 dl.model.clone(),
             )
-            .map(|(_, result)| Message::DownloadProgress(result))
+            .map(|(id, result)| Message::DownloadProgress(id, result))
         });
 
-        Subscription::batch(chat_subs.chain(download_sub))
+        Subscription::batch(chat_subs.chain(download_subs))
     }
 
     pub fn view(&self) -> Element<Message> {
@@ -371,60 +377,75 @@ impl OllamaGUI {
                 ]
                 .into()
             }
-            AppState::Settings => column![
-                top_nav,
-                column![
-                    text("Theme").size(16),
-                    iced::widget::pick_list(
-                        iced::Theme::ALL,
-                        Some(self.theme()),
-                        Message::ChangeTheme
+            AppState::Settings => {
+                let downloads_view = if self.download_progress.is_empty() {
+                    column!().into()
+                } else {
+                    column(
+                        self.download_progress
+                            .iter()
+                            .map(|dl| {
+                                let progress = if dl.total > 0 {
+                                    dl.completed as f32 / dl.total as f32
+                                } else {
+                                    0.0
+                                };
+                                let percentage = if dl.total > 0 {
+                                    (progress * 100.0) as u32
+                                } else {
+                                    0
+                                };
+                                column![
+                                    text(format!("Downloading {}: {}%", dl.model, percentage))
+                                        .size(16),
+                                    progress_bar(0.0..=1.0, progress).width(Length::Fixed(300.0)),
+                                    text(&dl.status)
+                                ]
+                                .padding([5, 0])
+                                .into()
+                            })
+                            .collect::<Vec<_>>(),
                     )
-                    .padding([5, 10])
-                    .width(Length::Shrink),
-                    text("Ollama URL").size(16),
-                    text_input("http://localhost:11434", &self.default_url)
-                        .on_input(Message::ChangeDefaultUrl)
-                        .padding(5)
-                        .width(Length::Fixed(300.0)),
-                    text("Download Model").size(16),
-                    row![
-                        text_input("Model name", &self.download_model_input)
-                            .on_input(Message::DownloadModelInputChanged)
+                };
+
+                column![
+                    top_nav,
+                    column![
+                        text("Theme").size(16),
+                        iced::widget::pick_list(
+                            iced::Theme::ALL,
+                            Some(self.theme()),
+                            Message::ChangeTheme
+                        )
+                        .padding([5, 10])
+                        .width(Length::Shrink),
+                        text("Ollama URL").size(16),
+                        text_input("http://localhost:11434", &self.default_url)
+                            .on_input(Message::ChangeDefaultUrl)
                             .padding(5)
                             .width(Length::Fixed(300.0)),
-                        button("Download")
-                            .on_press_maybe(
-                                if self.download_progress.is_some()
-                                    || self.download_model_input.is_empty()
-                                {
+                        text("Download Model").size(16),
+                        row![
+                            text_input("Model name", &self.download_model_input)
+                                .on_input(Message::DownloadModelInputChanged)
+                                .padding(5)
+                                .width(Length::Fixed(300.0)),
+                            button("Download")
+                                .on_press_maybe(if self.download_model_input.is_empty() {
                                     None
                                 } else {
                                     Some(Message::StartDownloadModel)
-                                }
-                            )
-                            .padding([5, 10])
-                    ],
-                    if let Some(dl) = &self.download_progress {
-                        let progress = if dl.total > 0 {
-                            dl.completed as f32 / dl.total as f32
-                        } else {
-                            0.0
-                        };
-                        column![
-                            progress_bar(0.0..=1.0, progress).width(Length::Fixed(300.0)),
-                            text(&dl.status),
-                        ]
-                        .spacing(5)
-                    } else {
-                        column!()
-                    }
+                                })
+                                .padding([5, 10])
+                        ],
+                        downloads_view
+                    ]
+                    .spacing(10)
+                    .padding(10)
+                    .align_x(Alignment::Start)
                 ]
-                .spacing(10)
-                .padding(10)
-                .align_x(Alignment::Start)
-            ]
-            .into(),
+                .into()
+            }
         }
     }
 }
