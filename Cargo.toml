@@ -20,7 +20,11 @@ iced = { version = "0.13.1", features = [
 ] }
 iced_aw = { version = "0.12.0" }
 tokio = { version = "1.43.0", features = ["full"] }
-reqwest = { version = "0.12.12", features = ["stream", "rustls-tls", "json"] }
+reqwest = { version = "0.12.12", default-features = false, features = [
+    "stream",
+    "rustls-tls",
+    "json",
+] }
 uuid = { version = "1.14.0", features = ["v4", "serde"] }
 serde_json = { version = "1.0.139" }
 serde = { version = "1.0.218", features = ["derive"] }
