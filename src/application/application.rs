@@ -1,10 +1,10 @@
 use iced::alignment::Horizontal;
 use iced::border::Radius;
-use iced::futures::{SinkExt, Stream, StreamExt};
+use iced::futures::{FutureExt, SinkExt, Stream, StreamExt};
 use iced::stream::try_channel;
 use iced::theme::Theme as IcedTheme;
-use iced::widget::{button, column, container, row, scrollable, text, text_input};
-use iced::{Alignment, Border, Color, Element, Length, Subscription};
+use iced::widget::{button, column, container, progress_bar, row, scrollable, text, text_input};
+use iced::{futures, Alignment, Border, Color, Element, Length, Subscription};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::fs;
@@ -42,6 +42,17 @@ pub struct OllamaGUI {
     state: AppState,
     default_url: String,
     theme: iced::Theme,
+    download_model_input: String,
+    download_progress: Option<DownloadProgress>,
+}
+
+#[derive(Debug, Clone)]
+struct DownloadProgress {
+    id: Uuid,
+    model: String,
+    status: String,
+    total: u64,
+    completed: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -59,6 +70,43 @@ pub enum Message {
     ChangeAppState(AppState),
     ChangeTheme(iced::Theme),
     ChangeDefaultUrl(String),
+    DownloadModelInputChanged(String),
+    StartDownloadModel,
+    DownloadProgress(Result<DownloadProgressUpdate, Error>),
+}
+
+#[derive(Debug, Clone)]
+pub enum DownloadProgressUpdate {
+    Progress {
+        status: String,
+        total: u64,
+        completed: u64,
+    },
+    Finished,
+}
+
+#[derive(Debug, Clone)]
+pub enum OllamaStreamProgress {
+    Streaming { token: String },
+    Finished { context: Vec<u64> },
+}
+
+#[derive(Debug, Clone)]
+pub enum Error {
+    RequestFailed(Arc<reqwest::Error>),
+    ParseError(Arc<serde_json::Error>),
+    ChannelError(Arc<futures::channel::mpsc::SendError>),
+}
+
+impl From<reqwest::Error> for Error {
+    fn from(error: reqwest::Error) -> Self {
+        Error::RequestFailed(Arc::new(error))
+    }
+}
+impl From<futures::channel::mpsc::SendError> for Error {
+    fn from(e: futures::channel::mpsc::SendError) -> Self {
+        Error::ChannelError(Arc::new(e))
+    }
 }
 
 impl OllamaGUI {
@@ -132,6 +180,8 @@ impl OllamaGUI {
             state: AppState::Chat,
             default_url: settings.default_url,
             theme,
+            download_model_input: String::new(),
+            download_progress: None,
         }
     }
 
@@ -200,6 +250,41 @@ impl OllamaGUI {
                 self.default_url = url;
                 self.save_settings();
             }
+            Message::DownloadModelInputChanged(input) => {
+                self.download_model_input = input;
+            }
+            Message::StartDownloadModel => {
+                if !self.download_model_input.is_empty() && self.download_progress.is_none() {
+                    self.download_progress = Some(DownloadProgress {
+                        id: Uuid::new_v4(),
+                        model: self.download_model_input.clone(),
+                        status: "Starting download...".into(),
+                        total: 0,
+                        completed: 0,
+                    });
+                }
+            }
+            Message::DownloadProgress(result) => match result {
+                Ok(DownloadProgressUpdate::Progress {
+                    status,
+                    total,
+                    completed,
+                }) => {
+                    if let Some(dl) = &mut self.download_progress {
+                        dl.status = status;
+                        dl.total = total;
+                        dl.completed = completed;
+                    }
+                }
+                Ok(DownloadProgressUpdate::Finished) => {
+                    self.download_progress = None;
+                }
+                Err(e) => {
+                    if let Some(dl) = &mut self.download_progress {
+                        dl.status = format!("Error: {:?}", e);
+                    }
+                }
+            },
         }
     }
 
@@ -208,15 +293,24 @@ impl OllamaGUI {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        Subscription::batch(
-            self.chats
-                .iter()
-                .map(|chat| chat.subscription(self.default_url.clone())),
-        )
+        let chat_subs = self
+            .chats
+            .iter()
+            .map(|chat| chat.subscription(self.default_url.clone()));
+
+        let download_sub = self.download_progress.as_ref().map(|dl| {
+            subscribe_to_download(
+                dl.id,
+                format!("{}/api/pull", self.default_url),
+                dl.model.clone(),
+            )
+            .map(|(_, result)| Message::DownloadProgress(result))
+        });
+
+        Subscription::batch(chat_subs.chain(download_sub))
     }
 
     pub fn view(&self) -> Element<Message> {
-        // Top navigation bar with compact spacing
         let top_nav = row![
             button("Chats")
                 .on_press(Message::ChangeAppState(AppState::Chat))
@@ -292,7 +386,39 @@ impl OllamaGUI {
                     text_input("http://localhost:11434", &self.default_url)
                         .on_input(Message::ChangeDefaultUrl)
                         .padding(5)
-                        .width(Length::Fixed(300.0))
+                        .width(Length::Fixed(300.0)),
+                    text("Download Model").size(16),
+                    row![
+                        text_input("Model name", &self.download_model_input)
+                            .on_input(Message::DownloadModelInputChanged)
+                            .padding(5)
+                            .width(Length::Fixed(300.0)),
+                        button("Download")
+                            .on_press_maybe(
+                                if self.download_progress.is_some()
+                                    || self.download_model_input.is_empty()
+                                {
+                                    None
+                                } else {
+                                    Some(Message::StartDownloadModel)
+                                }
+                            )
+                            .padding([5, 10])
+                    ],
+                    if let Some(dl) = &self.download_progress {
+                        let progress = if dl.total > 0 {
+                            dl.completed as f32 / dl.total as f32
+                        } else {
+                            0.0
+                        };
+                        column![
+                            progress_bar(0.0..=1.0, progress).width(Length::Fixed(300.0)),
+                            text(&dl.status),
+                        ]
+                        .spacing(5)
+                    } else {
+                        column!()
+                    }
                 ]
                 .spacing(10)
                 .padding(10)
@@ -522,7 +648,6 @@ impl OllamaChat {
                             )
                             .width(Length::Fill)
                             .style(borderless_input_style()),
-                            // text(format!("AI: {}", entry.response)),
                         ]
                         .spacing(5)
                         .padding(10)
@@ -580,26 +705,7 @@ fn borderless_input_style(
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum OllamaStreamProgress {
-    Streaming { token: String },
-    Finished { context: Vec<u64> },
-}
-
-#[derive(Debug, Clone)]
-pub enum Error {
-    #[allow(dead_code)]
-    RequestFailed(Arc<reqwest::Error>),
-    // NoContentLength,
-}
-
-impl From<reqwest::Error> for Error {
-    fn from(error: reqwest::Error) -> Self {
-        Error::RequestFailed(Arc::new(error))
-    }
-}
-
-pub fn subscribe_to_stream<I: 'static + Hash + Copy + Send + Sync, T: ToString>(
+fn subscribe_to_stream<I: 'static + Hash + Copy + Send + Sync, T: ToString>(
     id: I,
     url: T,
     prompt: &str,
@@ -674,4 +780,84 @@ fn fetch_and_stream_response(
         }
         Ok(())
     })
+}
+
+fn subscribe_to_download<I: 'static + Hash + Send + Sync + Clone>(
+    id: I,
+    url: String,
+    model: String,
+) -> Subscription<(I, Result<DownloadProgressUpdate, Error>)> {
+    Subscription::run_with_id(
+        id.clone(),
+        iced::futures::stream::unfold(
+            (id, url, model, None),
+            move |(id, url, model, mut client)| async move {
+                let client = client.unwrap_or_else(|| reqwest::Client::new());
+                let body = json!({ "model": model, "stream": true });
+
+                match client.post(&url).json(&body).send().await {
+                    Ok(response) => {
+                        let mut stream = response.bytes_stream();
+                        while let Some(chunk) = stream.next().await {
+                            match chunk {
+                                Ok(bytes) => {
+                                    let chunk_str = String::from_utf8_lossy(&bytes);
+                                    for line in chunk_str.lines() {
+                                        match serde_json::from_str::<serde_json::Value>(line) {
+                                            Ok(json) => {
+                                                if let Some(status) =
+                                                    json.get("status").and_then(|v| v.as_str())
+                                                {
+                                                    let total = json
+                                                        .get("total")
+                                                        .and_then(|v| v.as_u64())
+                                                        .unwrap_or(0);
+                                                    let completed = json
+                                                        .get("completed")
+                                                        .and_then(|v| v.as_u64())
+                                                        .unwrap_or(0);
+
+                                                    return Some((
+                                                        (
+                                                            id.clone(),
+                                                            Ok(DownloadProgressUpdate::Progress {
+                                                                status: status.to_string(),
+                                                                total,
+                                                                completed,
+                                                            }),
+                                                        ),
+                                                        (id, url, model, Some(client)),
+                                                    ));
+                                                }
+                                            }
+                                            Err(e) => {
+                                                return Some((
+                                                    (
+                                                        id.clone(),
+                                                        Err(Error::ParseError(Arc::new(e))),
+                                                    ),
+                                                    (id, url, model, Some(client)),
+                                                ))
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    return Some((
+                                        (id.clone(), Err(Error::RequestFailed(Arc::new(e)))),
+                                        (id, url, model, Some(client)),
+                                    ))
+                                }
+                            }
+                        }
+                        None
+                    }
+                    Err(e) => Some((
+                        (id.clone(), Err(Error::RequestFailed(Arc::new(e)))),
+                        (id, url, model, Some(client)),
+                    )),
+                }
+            },
+        ),
+    )
 }
