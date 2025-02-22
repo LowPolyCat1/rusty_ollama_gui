@@ -1,4 +1,4 @@
-use iced::alignment::Horizontal;
+use iced::alignment::{Horizontal, Vertical};
 use iced::border::Radius;
 use iced::futures::{SinkExt, Stream, StreamExt};
 use iced::stream::try_channel;
@@ -411,12 +411,14 @@ impl OllamaGUI {
                                                     .width(Length::Fixed(300.0)),
                                                 text(&dl.status)
                                             ]
+                                            .padding([5, 0])
                                             .spacing(5)
                                         ),
                                         button("Cancel")
                                             .on_press(Message::CancelDownload(dl.id))
                                             .padding([5, 10])
                                     ]
+                                    .align_y(Vertical::Center)
                                     .spacing(10),
                                 )
                             })
@@ -445,7 +447,12 @@ impl OllamaGUI {
                             text_input("Model name", &self.download_model_input)
                                 .on_input(Message::DownloadModelInputChanged)
                                 .padding(5)
-                                .width(Length::Fixed(300.0)),
+                                .width(Length::Fixed(300.0))
+                                .on_submit_maybe(if self.download_model_input.is_empty() {
+                                    None
+                                } else {
+                                    Some(Message::StartDownloadModel)
+                                }),
                             button("Download")
                                 .on_press_maybe(if self.download_model_input.is_empty() {
                                     None
@@ -679,12 +686,13 @@ impl OllamaChat {
                     .map(|entry| {
                         column![
                             text(format!("Prompt: {}", entry.prompt)),
-                            iced::widget::TextInput::new(
-                                "",
-                                &format!("{}: {}", self.model, entry.response)
-                            )
-                            .width(Length::Fill)
-                            .style(borderless_input_style()),
+                            // iced::widget::TextInput::new(
+                            //     "",
+                            //     &format!("{}: {}", self.model, entry.response)
+                            // )
+                            // .width(Length::Fill)
+                            // .style(borderless_input_style()),
+                            text(format!("{}: {}", self.model, entry.response)).width(Length::Fill)
                         ]
                         .spacing(5)
                         .padding(10)
