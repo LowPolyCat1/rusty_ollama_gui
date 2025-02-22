@@ -102,12 +102,9 @@ cargo build --release
 - [x] Downloading Models
   - [x] Downloading Model
   - [x] Progress Bar
-
-### Currently working on
-
-- [ ] Specifying Model
-  - [ ] Getting Local Models
-  - [ ] Add Selection to Settings page
+- [x] Specifying Model
+  - [x] Getting Local Models
+  - [x] Add Selection to Settings page
 
 ### Possible Future Features
 
