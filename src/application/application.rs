@@ -22,7 +22,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            theme: format!("{:?}", IcedTheme::GruvboxDark),
+            theme: format!("{:?}", IcedTheme::KanagawaDragon),
             default_url: "http://localhost:11434".to_string(),
         }
     }
