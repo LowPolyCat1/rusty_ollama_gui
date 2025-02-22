@@ -1,6 +1,6 @@
 use iced::alignment::Horizontal;
 use iced::border::Radius;
-use iced::futures::{FutureExt, SinkExt, Stream, StreamExt};
+use iced::futures::{SinkExt, Stream, StreamExt};
 use iced::stream::try_channel;
 use iced::theme::Theme as IcedTheme;
 use iced::widget::{button, column, container, progress_bar, row, scrollable, text, text_input};
@@ -43,7 +43,7 @@ pub struct OllamaGUI {
     default_url: String,
     theme: iced::Theme,
     download_model_input: String,
-    // Modified: Now support multiple concurrent downloads
+    // Support multiple downloads concurrently.
     download_progress: Vec<DownloadProgress>,
 }
 
@@ -73,8 +73,9 @@ pub enum Message {
     ChangeDefaultUrl(String),
     DownloadModelInputChanged(String),
     StartDownloadModel,
-    // Modified: Include the download id with the progress update.
     DownloadProgress(Uuid, Result<DownloadProgressUpdate, Error>),
+    // New message variant for canceling a download.
+    CancelDownload(Uuid),
 }
 
 #[derive(Debug, Clone)]
@@ -105,6 +106,7 @@ impl From<reqwest::Error> for Error {
         Error::RequestFailed(Arc::new(error))
     }
 }
+
 impl From<futures::channel::mpsc::SendError> for Error {
     fn from(e: futures::channel::mpsc::SendError) -> Self {
         Error::ChannelError(Arc::new(e))
@@ -183,7 +185,7 @@ impl OllamaGUI {
             default_url: settings.default_url,
             theme,
             download_model_input: String::new(),
-            download_progress: Vec::new(), // Modified: no longer Option, now an empty vector
+            download_progress: Vec::new(),
         }
     }
 
@@ -241,7 +243,7 @@ impl OllamaGUI {
                 if self.current_chat == uuid {
                     self.current_chat = self.chats.first().map(|c| c.uuid).unwrap_or(Uuid::nil());
                 }
-                let _ = std::fs::remove_file(format!("./chats/{}.json", uuid));
+                let _ = fs::remove_file(format!("./chats/{}.json", uuid));
             }
             Message::ChangeAppState(app_state) => self.state = app_state,
             Message::ChangeTheme(theme) => {
@@ -257,7 +259,6 @@ impl OllamaGUI {
             }
             Message::StartDownloadModel => {
                 if !self.download_model_input.is_empty() {
-                    // Create a new download progress entry and add it to the vector.
                     self.download_progress.push(DownloadProgress {
                         id: Uuid::new_v4(),
                         model: self.download_model_input.clone(),
@@ -265,7 +266,6 @@ impl OllamaGUI {
                         total: 0,
                         completed: 0,
                     });
-                    // Optionally clear the input so a new model can be entered.
                     self.download_model_input.clear();
                 }
             }
@@ -290,6 +290,10 @@ impl OllamaGUI {
                     }
                 }
             },
+            Message::CancelDownload(id) => {
+                // Remove the download entry when the user cancels it.
+                self.download_progress.retain(|dl| dl.id != id);
+            }
         }
     }
 
@@ -303,7 +307,6 @@ impl OllamaGUI {
             .iter()
             .map(|chat| chat.subscription(self.default_url.clone()));
 
-        // Modified: create a subscription for each active download
         let download_subs = self.download_progress.iter().map(|dl| {
             subscribe_to_download(
                 dl.id,
@@ -384,7 +387,7 @@ impl OllamaGUI {
                     column(
                         self.download_progress
                             .iter()
-                            .map(|dl| {
+                            .map(|dl| -> Element<Message> {
                                 let progress = if dl.total > 0 {
                                     dl.completed as f32 / dl.total as f32
                                 } else {
@@ -395,14 +398,27 @@ impl OllamaGUI {
                                 } else {
                                     0
                                 };
-                                column![
-                                    text(format!("Downloading {}: {}%", dl.model, percentage))
-                                        .size(16),
-                                    progress_bar(0.0..=1.0, progress).width(Length::Fixed(300.0)),
-                                    text(&dl.status)
-                                ]
-                                .padding([5, 0])
-                                .into()
+                                Into::<Element<Message>>::into(
+                                    row![
+                                        Into::<Element<Message>>::into(
+                                            column![
+                                                text(format!(
+                                                    "Downloading {}: {}%",
+                                                    dl.model, percentage
+                                                ))
+                                                .size(16),
+                                                progress_bar::<iced::Theme>(0.0..=1.0, progress)
+                                                    .width(Length::Fixed(300.0)),
+                                                text(&dl.status)
+                                            ]
+                                            .spacing(5)
+                                        ),
+                                        button("Cancel")
+                                            .on_press(Message::CancelDownload(dl.id))
+                                            .padding([5, 10])
+                                    ]
+                                    .spacing(10),
+                                )
                             })
                             .collect::<Vec<_>>(),
                     )
@@ -576,7 +592,7 @@ impl OllamaChat {
 
     fn save_chat_history(&self) {
         let file_path = format!("./chats/{}.json", self.uuid);
-        let _ = std::fs::create_dir_all("./chats");
+        let _ = fs::create_dir_all("./chats");
 
         let chat_history = ChatHistory {
             display_name: self.display_name.clone(),
@@ -586,7 +602,7 @@ impl OllamaChat {
             chat: self.chat_entries.clone(),
         };
 
-        if let Ok(file) = std::fs::File::create(&file_path) {
+        if let Ok(file) = fs::File::create(&file_path) {
             let _ = serde_json::to_writer_pretty(file, &chat_history);
         }
     }
@@ -680,11 +696,9 @@ impl OllamaChat {
         )
         .height(Length::Fill);
 
-        let on_submit_message = {
-            match self.state {
-                ChatState::Streaming => None,
-                _ => Some(Message::StartChat(self.uuid)),
-            }
+        let on_submit_message = match self.state {
+            ChatState::Streaming => None,
+            _ => Some(Message::StartChat(self.uuid)),
         };
 
         let input_row = row![
@@ -812,7 +826,7 @@ fn subscribe_to_download<I: 'static + Hash + Send + Sync + Clone>(
         id.clone(),
         iced::futures::stream::unfold(
             (id, url, model, None),
-            move |(id, url, model, mut client)| async move {
+            move |(id, url, model, client)| async move {
                 let client = client.unwrap_or_else(|| reqwest::Client::new());
                 let body = json!({ "model": model, "stream": true });
 
