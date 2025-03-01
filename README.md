@@ -1,3 +1,11 @@
+<a id="readme-top"></a>
+
+[![Contributors][contributors-shield]][contributors-url]
+[![Forks][forks-shield]][forks-url]
+[![Stargazers][stars-shield]][stars-url]
+[![Issues][issues-shield]][issues-url]
+[![project_license][license-shield]][license-url]
+
 <!-- PROJECT LOGO -->
 <br />
 <div align="center">
@@ -196,3 +204,15 @@ Project Link: [https://github.com/lowpolycat1/rusty_ollama_gui](https://github.c
 [Tokio-url]: https://tokio.rs/
 [Serde-shield]: https://img.shields.io/badge/Serde-000000?style=for-the-badge&logo=serde&logoColor=white
 [Serde-url]: https://serde.rs/
+[contributors-shield]: https://img.shields.io/github/contributors/LowPolyCat1/rusty_ollama_gui.svg?style=for-the-badge
+[contributors-url]: https://github.com/LowPolyCat1/rusty_ollama_gui/graphs/contributors
+[forks-shield]: https://img.shields.io/github/forks/LowPolyCat1/rusty_ollama_gui.svg?style=for-the-badge
+[forks-url]: https://github.com/LowPolyCat1/rusty_ollama_gui/network/members
+[stars-shield]: https://img.shields.io/github/stars/LowPolyCat1/rusty_ollama_gui.svg?style=for-the-badge
+[stars-url]: https://github.com/LowPolyCat1/rusty_ollama_gui/stargazers
+[issues-shield]: https://img.shields.io/github/issues/LowPolyCat1/rusty_ollama_gui.svg?style=for-the-badge
+[issues-url]: https://github.com/LowPolyCat1/rusty_ollama_gui/issues
+[license-shield]: https://img.shields.io/github/license/LowPolyCat1/rusty_ollama_gui.svg?style=for-the-badge
+[license-url]: https://github.com/LowPolyCat1/rusty_ollama_gui/blob/main/license.txt
+[Rust]: https://img.shields.io/badge/rust-000000?style=for-the-badge&logo=rust&logoColor=white
+[Rust-url]: https://www.rust-lang.org/
